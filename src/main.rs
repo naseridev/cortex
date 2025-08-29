@@ -17,9 +17,7 @@ use std::{
 use sysinfo::{ComponentExt, CpuExt, System, SystemExt};
 use zeroize::Zeroize;
 
-const MAX_ATTEMPTS: u32 = 3;
 const INIT_MARKER: &str = "__init__";
-const LOCKOUT_TIME_KEY: &str = "__lockout__";
 const TEST_DATA: &[u8] = b"cortex_secure_init_marker";
 const HARDWARE_SALT: &[u8] = b"cortex_hw_salt";
 const MAX_DESCRIPTION_LENGTH: usize = 72;
@@ -87,12 +85,6 @@ struct PasswordEntry {
     timestamp: u64,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SecurityState {
-    attempts: u32,
-    lockout_until: u64,
-}
-
 struct SecureString(String);
 
 impl Drop for SecureString {
@@ -133,32 +125,6 @@ impl Cortex {
         Ok(Self { db, cipher })
     }
 
-    fn check_security(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let now = Self::current_timestamp();
-
-        if let Some(data) = self.db.get(LOCKOUT_TIME_KEY)? {
-            let state: SecurityState = bincode::deserialize(&data)?;
-
-            if now < state.lockout_until {
-                eprintln!("Access locked due to multiple failed attempts");
-                process::exit(1);
-            }
-
-            if state.attempts >= MAX_ATTEMPTS {
-                self.reset_security_state()?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn reset_security_state(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.db.remove(LOCKOUT_TIME_KEY)?;
-        self.db.flush()?;
-
-        Ok(())
-    }
-
     fn init_db(&self) -> Result<(), Box<dyn std::error::Error>> {
         let entry = self.create_entry(TEST_DATA, None)?;
         self.db.insert(INIT_MARKER, bincode::serialize(&entry)?)?;
@@ -168,8 +134,6 @@ impl Cortex {
     }
 
     fn verify_master_password(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        self.check_security()?;
-
         let result = match self.db.get(INIT_MARKER)? {
             Some(data) => {
                 let entry: PasswordEntry = bincode::deserialize(&data)?;

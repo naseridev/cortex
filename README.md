@@ -157,12 +157,6 @@ cortex destroy
 # Output: "Database destroyed."
 ```
 
-### Error Handling and Security Features
-
-**Authentication Failures:**
-- After 3 failed master password attempts, the system enters lockout mode
-- Access is temporarily denied to prevent brute force attacks
-
 **Common Error Scenarios:**
 ```bash
 # Database already exists

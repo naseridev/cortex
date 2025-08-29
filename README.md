@@ -12,7 +12,6 @@ Cortex is a command-line password manager that uses ChaCha20-Poly1305 authentica
 - **ChaCha20-Poly1305 AEAD**: Military-grade authenticated encryption
 - **BLAKE3 Hashing**: High-performance cryptographic hashing for key derivation
 - **Secure Memory Handling**: Automatic memory zeroing using the `zeroize` crate
-- **Lockout Protection**: Automatic lockout after failed authentication attempts
 - **Embedded Database**: Uses Sled for efficient, embedded storage
 - **Password Validation**: Built-in checks to prevent weak passwords and information leakage
 
@@ -190,7 +189,6 @@ The database is automatically created in the system's configuration directory:
 
 - **Hardware Binding**: Database cannot be transferred between different systems
 - **Memory Security**: All sensitive data is automatically zeroed after use
-- **Lockout Mechanism**: Multiple failed attempts trigger temporary lockout
 - **Password Strength**: Enforced minimum lengths for master and account passwords
 - **Information Leakage Prevention**: Descriptions cannot contain password fragments
 

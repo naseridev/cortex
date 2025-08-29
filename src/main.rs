@@ -1,0 +1,875 @@
+use blake3::Hasher;
+use chacha20poly1305::{
+    ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit},
+};
+
+use clap::{Parser, Subcommand};
+use rand::{RngCore, rngs::OsRng};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::{
+    path::PathBuf,
+    process,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use sysinfo::{ComponentExt, CpuExt, System, SystemExt};
+use zeroize::Zeroize;
+
+const MAX_ATTEMPTS: u32 = 3;
+const INIT_MARKER: &str = "__init__";
+const LOCKOUT_TIME_KEY: &str = "__lockout__";
+const TEST_DATA: &[u8] = b"cortex_secure_init_marker";
+const HARDWARE_SALT: &[u8] = b"cortex_hw_salt";
+const MAX_DESCRIPTION_LENGTH: usize = 72;
+const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
+const MIN_MASTER_PASSWORD_LENGTH: usize = 8;
+
+#[derive(Parser)]
+#[command(
+    name = "cortex",
+    about = "Keep your passwords safe",
+    version = "1.0.0",
+    author = "Nima Naseri <nerdnull@proton.me>"
+)]
+#[command(long_about = "A no-nonsense password manager using hardware-backed key derivation.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    #[command(about = "Initialize a new password database with master password")]
+    Init,
+
+    #[command(about = "Add a new password entry")]
+    Add {
+        #[arg(help = "Name/identifier for the password entry")]
+        name: String,
+    },
+
+    #[command(about = "Retrieve a password entry")]
+    Get {
+        #[arg(help = "Name of the password entry to retrieve")]
+        name: String,
+    },
+
+    #[command(about = "List all stored password entries")]
+    List,
+
+    #[command(about = "Remove a password entry")]
+    Remove {
+        #[arg(help = "Name of the password entry to remove")]
+        name: String,
+    },
+
+    #[command(about = "Change password and description for existing entry")]
+    Change {
+        #[arg(help = "Name of the password entry to change")]
+        name: String,
+    },
+
+    #[command(about = "Reset the master password")]
+    Reset,
+
+    #[command(about = "Permanently destroy the entire password database")]
+    Destroy,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PasswordEntry {
+    encrypted_password: Vec<u8>,
+    encrypted_description: Option<Vec<u8>>,
+    nonce: [u8; 12],
+    desc_nonce: Option<[u8; 12]>,
+    timestamp: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SecurityState {
+    attempts: u32,
+    lockout_until: u64,
+}
+
+struct SecureString(String);
+
+impl Drop for SecureString {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl SecureString {
+    fn new(s: String) -> Self {
+        Self(s)
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+struct Cortex {
+    db: sled::Db,
+    cipher: ChaCha20Poly1305,
+}
+
+impl Cortex {
+    fn new(master_password: &SecureString) -> Result<Self, Box<dyn std::error::Error>> {
+        let db_path = Self::get_db_path();
+        let db = sled::open(&db_path)?;
+        let cipher = ChaCha20Poly1305::new(&Self::derive_key(master_password.as_bytes()));
+
+        Ok(Self { db, cipher })
+    }
+
+    fn check_security(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let now = Self::current_timestamp();
+
+        if let Some(data) = self.db.get(LOCKOUT_TIME_KEY)? {
+            let state: SecurityState = bincode::deserialize(&data)?;
+
+            if now < state.lockout_until {
+                eprintln!("Access locked due to multiple failed attempts");
+                process::exit(1);
+            }
+
+            if state.attempts >= MAX_ATTEMPTS {
+                self.reset_security_state()?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn reset_security_state(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.db.remove(LOCKOUT_TIME_KEY)?;
+        self.db.flush()?;
+
+        Ok(())
+    }
+
+    fn init_db(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let entry = self.create_entry(TEST_DATA, None)?;
+        self.db.insert(INIT_MARKER, bincode::serialize(&entry)?)?;
+        self.db.flush()?;
+
+        Ok(())
+    }
+
+    fn verify_master_password(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        self.check_security()?;
+
+        let result = match self.db.get(INIT_MARKER)? {
+            Some(data) => {
+                let entry: PasswordEntry = bincode::deserialize(&data)?;
+                self.decrypt_entry(&entry)
+                    .map(|d| d == TEST_DATA)
+                    .unwrap_or(false)
+            }
+            None => false,
+        };
+
+        Ok(result)
+    }
+
+    fn create_entry(
+        &self,
+        data: &[u8],
+        description: Option<&str>,
+    ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
+        let mut nonce_bytes = [0u8; 12];
+
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let encrypted = self
+            .cipher
+            .encrypt(nonce, data)
+            .map_err(|_| "Encryption failed")?;
+
+        let (encrypted_description, desc_nonce) = if let Some(desc) = description {
+            let mut desc_nonce_bytes = [0u8; 12];
+
+            OsRng.fill_bytes(&mut desc_nonce_bytes);
+            let desc_nonce = Nonce::from_slice(&desc_nonce_bytes);
+
+            let encrypted_desc = self
+                .cipher
+                .encrypt(desc_nonce, desc.as_bytes())
+                .map_err(|_| "Description encryption failed")?;
+
+            (Some(encrypted_desc), Some(desc_nonce_bytes))
+        } else {
+            (None, None)
+        };
+
+        Ok(PasswordEntry {
+            encrypted_password: encrypted,
+            encrypted_description,
+            nonce: nonce_bytes,
+            desc_nonce,
+            timestamp: Self::current_timestamp(),
+        })
+    }
+
+    fn decrypt_entry(&self, entry: &PasswordEntry) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let nonce = Nonce::from_slice(&entry.nonce);
+        self.cipher
+            .decrypt(nonce, entry.encrypted_password.as_ref())
+            .map_err(|_| "Decryption failed".into())
+    }
+
+    fn decrypt_description(
+        &self,
+        entry: &PasswordEntry,
+    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
+        if let (Some(encrypted_desc), Some(desc_nonce)) =
+            (&entry.encrypted_description, &entry.desc_nonce)
+        {
+            let nonce = Nonce::from_slice(desc_nonce);
+            let decrypted = self
+                .cipher
+                .decrypt(nonce, encrypted_desc.as_ref())
+                .map_err(|_| "Description decryption failed")?;
+
+            Ok(Some(String::from_utf8(decrypted)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn add_password(
+        &self,
+        name: &str,
+        password: &SecureString,
+        description: Option<&str>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.db.get(name)?.is_some() {
+            return Ok(false);
+        }
+
+        let entry = self.create_entry(password.as_bytes(), description)?;
+        self.db.insert(name, bincode::serialize(&entry)?)?;
+        self.db.flush()?;
+
+        Ok(true)
+    }
+
+    fn get_password(
+        &self,
+        name: &str,
+    ) -> Result<Option<(SecureString, Option<String>)>, Box<dyn std::error::Error>> {
+        match self.db.get(name)? {
+            Some(data) => {
+                let entry: PasswordEntry = bincode::deserialize(&data)?;
+                let decrypted = self.decrypt_entry(&entry)?;
+                let password = String::from_utf8(decrypted)?;
+                let description = self.decrypt_description(&entry)?;
+                Ok(Some((SecureString::new(password), description)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn list_entries(&self) -> Result<Vec<(String, Option<String>)>, Box<dyn std::error::Error>> {
+        let mut entries: Vec<(String, Option<String>)> = Vec::new();
+
+        for item in self.db.iter() {
+            let (key, value) = item?;
+            let key_str = String::from_utf8(key.to_vec())?;
+
+            if !key_str.starts_with("__") {
+                let entry: PasswordEntry = bincode::deserialize(&value)?;
+                let description = self.decrypt_description(&entry)?;
+                entries.push((key_str, description));
+            }
+        }
+
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(entries)
+    }
+
+    fn remove_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        if name.starts_with("__") {
+            return Ok(false);
+        }
+
+        match self.db.remove(name)? {
+            Some(_) => {
+                self.db.flush()?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    fn change_password(
+        &self,
+        name: &str,
+        new_password: &SecureString,
+        new_description: Option<&str>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        if name.starts_with("__") || self.db.get(name)?.is_none() {
+            return Ok(false);
+        }
+
+        let entry = self.create_entry(new_password.as_bytes(), new_description)?;
+        self.db.insert(name, bincode::serialize(&entry)?)?;
+        self.db.flush()?;
+
+        Ok(true)
+    }
+
+    fn reset_master_password(
+        &self,
+        new_password: &SecureString,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let entries = self.collect_all_entries()?;
+        let new_cipher = ChaCha20Poly1305::new(&Self::derive_key(new_password.as_bytes()));
+
+        for (name, password, description) in &entries {
+            let entry = Self::encrypt_with_cipher(
+                &new_cipher,
+                password.as_bytes(),
+                description.as_deref(),
+            )?;
+            self.db.insert(name, bincode::serialize(&entry)?)?;
+        }
+
+        let test_entry = Self::encrypt_with_cipher(&new_cipher, TEST_DATA, None)?;
+        self.db
+            .insert(INIT_MARKER, bincode::serialize(&test_entry)?)?;
+        self.db.flush()?;
+
+        Ok(())
+    }
+
+    fn collect_all_entries(
+        &self,
+    ) -> Result<Vec<(String, SecureString, Option<String>)>, Box<dyn std::error::Error>> {
+        let mut entries = Vec::new();
+
+        for item in self.db.iter() {
+            let (key, value) = item?;
+            let key_str = String::from_utf8(key.to_vec())?;
+
+            if !key_str.starts_with("__") {
+                let entry: PasswordEntry = bincode::deserialize(&value)?;
+                let decrypted = self.decrypt_entry(&entry)?;
+                let password = String::from_utf8(decrypted)?;
+                let description = self.decrypt_description(&entry)?;
+                entries.push((key_str, SecureString::new(password), description));
+            }
+        }
+
+        Ok(entries)
+    }
+
+    fn encrypt_with_cipher(
+        cipher: &ChaCha20Poly1305,
+        data: &[u8],
+        description: Option<&str>,
+    ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
+        let mut nonce_bytes = [0u8; 12];
+
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let encrypted = cipher
+            .encrypt(nonce, data)
+            .map_err(|_| "Encryption failed")?;
+
+        let (encrypted_description, desc_nonce) = if let Some(desc) = description {
+            let mut desc_nonce_bytes = [0u8; 12];
+            OsRng.fill_bytes(&mut desc_nonce_bytes);
+            let desc_nonce = Nonce::from_slice(&desc_nonce_bytes);
+
+            let encrypted_desc = cipher
+                .encrypt(desc_nonce, desc.as_bytes())
+                .map_err(|_| "Description encryption failed")?;
+
+            (Some(encrypted_desc), Some(desc_nonce_bytes))
+        } else {
+            (None, None)
+        };
+
+        Ok(PasswordEntry {
+            encrypted_password: encrypted,
+            encrypted_description,
+            nonce: nonce_bytes,
+            desc_nonce,
+            timestamp: Self::current_timestamp(),
+        })
+    }
+
+    fn destroy_database(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.db.clear()?;
+        self.db.flush()?;
+
+        let db_path = Self::get_db_path();
+        if db_path.exists() {
+            if let Some(parent) = db_path.parent() {
+                std::fs::remove_dir_all(parent)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn derive_key(password: &[u8]) -> Key {
+        let hardware_id = Self::get_hardware_id();
+        let mut hasher = Hasher::new();
+
+        hasher.update(password);
+        hasher.update(&hardware_id);
+
+        let hash = hasher.finalize();
+        *Key::from_slice(&hash.as_bytes()[..32])
+    }
+
+    fn get_hardware_id() -> Vec<u8> {
+        let mut hasher = Hasher::new();
+        let mut sys = System::new_all();
+
+        sys.refresh_all();
+
+        if let Some(cpu) = sys.cpus().first() {
+            hasher.update(cpu.brand().as_bytes());
+        }
+
+        for component in sys.components() {
+            hasher.update(component.label().as_bytes());
+        }
+
+        hasher.update(HARDWARE_SALT);
+        hasher.finalize().as_bytes().to_vec()
+    }
+
+    fn get_db_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("cortex");
+
+        std::fs::create_dir_all(&path).ok();
+        path.push("passwords.db");
+        path
+    }
+
+    fn current_timestamp() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+}
+
+struct UserPrompt;
+
+impl UserPrompt {
+    fn password(prompt: &str) -> Result<SecureString, Box<dyn std::error::Error>> {
+        let password = rpassword::prompt_password(prompt)?;
+
+        if password.is_empty() {
+            return Err("Empty password not allowed".into());
+        }
+
+        Ok(SecureString::new(password))
+    }
+
+    fn text(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+        use std::io::{self, Write};
+        print!("{}", prompt);
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        Ok(input.trim().to_string())
+    }
+}
+
+struct Handler;
+
+impl Handler {
+    fn handle_init() -> Result<(), Box<dyn std::error::Error>> {
+        let db_path = Cortex::get_db_path();
+
+        if db_path.exists() {
+            eprintln!("Database exists. Use 'reset' command.");
+            process::exit(1);
+        }
+
+        let master_password = UserPrompt::password("Master password: ")?;
+
+        if master_password.len() < MIN_MASTER_PASSWORD_LENGTH {
+            return Err(format!(
+                "Master password must be at least {} characters",
+                MIN_MASTER_PASSWORD_LENGTH
+            )
+            .into());
+        }
+
+        let confirm_password = UserPrompt::password("Confirm password: ")?;
+
+        if master_password.as_str() != confirm_password.as_str() {
+            return Err("Password mismatch".into());
+        }
+
+        let guard = Cortex::new(&master_password)?;
+        guard.init_db()?;
+
+        println!("Initialized.");
+
+        Ok(())
+    }
+
+    fn handle_add(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        if guard.db.get(&name)?.is_some() {
+            eprintln!(
+                "Error: Account '{}' already exists. Use 'change' to update or choose a different name.",
+                name
+            );
+            process::exit(1);
+        }
+
+        let password = UserPrompt::password("Password to store: ")?;
+
+        if password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password must be at least {} characters",
+                MIN_ACCOUNT_PASSWORD_LENGTH
+            )
+            .into());
+        }
+
+        let confirm_password = UserPrompt::password("Confirm password: ")?;
+
+        if password.as_str() != confirm_password.as_str() {
+            return Err("Password mismatch".into());
+        }
+
+        let description_input = UserPrompt::text("Description (optional): ")?;
+        let description = if description_input.is_empty() {
+            None
+        } else if description_input.len() > MAX_DESCRIPTION_LENGTH {
+            return Err(format!(
+                "Description too long (max {} chars)",
+                MAX_DESCRIPTION_LENGTH
+            )
+            .into());
+        } else if Utils::password_desc_valid(password.as_str(), &description_input) {
+            eprintln!("Error: Description cannot contain the password or parts of it.");
+            process::exit(1);
+        } else {
+            Some(description_input.as_str())
+        };
+
+        if guard.add_password(&name, &password, description)? {
+            println!("Added '{}'", name);
+        }
+
+        Ok(())
+    }
+
+    fn handle_get(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        match guard.get_password(&name)? {
+            Some((password, description)) => {
+                println!("{}: {}", name, password.as_str());
+                if let Some(desc) = description {
+                    println!("Description: {}", desc);
+                }
+            }
+            None => println!("Not found: {}", name),
+        }
+
+        Ok(())
+    }
+
+    fn handle_list() -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        let entries = guard.list_entries()?;
+
+        if entries.is_empty() {
+            println!("No entries");
+        } else {
+            for (name, description) in entries {
+                if let Some(desc) = description {
+                    println!("  {} - {}", name, desc);
+                } else {
+                    println!("  {}", name);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_remove(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        if guard.remove_password(&name)? {
+            println!("Removed '{}'", name);
+        } else {
+            println!("Not found: {}", name);
+        }
+
+        Ok(())
+    }
+
+    fn handle_change(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        let new_password = UserPrompt::password("New password: ")?;
+
+        if new_password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password must be at least {} characters",
+                MIN_ACCOUNT_PASSWORD_LENGTH
+            )
+            .into());
+        }
+
+        let confirm_password = UserPrompt::password("Confirm new password: ")?;
+
+        if new_password.as_str() != confirm_password.as_str() {
+            return Err("Password mismatch".into());
+        }
+
+        let description_input = UserPrompt::text("New description (optional, max 72 chars): ")?;
+        let description = if description_input.is_empty() {
+            None
+        } else if description_input.len() > MAX_DESCRIPTION_LENGTH {
+            return Err(format!(
+                "Description too long (max {} chars)",
+                MAX_DESCRIPTION_LENGTH
+            )
+            .into());
+        } else if Utils::password_desc_valid(new_password.as_str(), &description_input) {
+            eprintln!("Error: Description cannot contain the password or parts of it.");
+            process::exit(1);
+        } else {
+            Some(description_input.as_str())
+        };
+
+        if guard.change_password(&name, &new_password, description)? {
+            println!("Changed password for '{}'", name);
+        } else {
+            println!("Not found: {}", name);
+        }
+
+        Ok(())
+    }
+
+    fn handle_reset() -> Result<(), Box<dyn std::error::Error>> {
+        let old_password = UserPrompt::password("Current master password: ")?;
+        let guard = Cortex::new(&old_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        let new_password = UserPrompt::password("New master password: ")?;
+
+        if new_password.len() < MIN_MASTER_PASSWORD_LENGTH {
+            return Err(format!(
+                "Master password must be at least {} characters",
+                MIN_MASTER_PASSWORD_LENGTH
+            )
+            .into());
+        }
+
+        let confirm_password = UserPrompt::password("Confirm new password: ")?;
+
+        if new_password.as_str() != confirm_password.as_str() {
+            return Err("Password mismatch".into());
+        }
+
+        guard.reset_master_password(&new_password)?;
+        println!("Master password reset.");
+
+        Ok(())
+    }
+
+    fn handle_destroy() -> Result<(), Box<dyn std::error::Error>> {
+        println!("WARNING: This will permanently delete all stored passwords!");
+
+        let (puzzle, answer) = Utils::generate_math_puzzle();
+        println!("Solve this equation to confirm: {}", puzzle);
+
+        let user_answer = UserPrompt::password("Answer: ")?;
+        let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
+
+        if user_num != answer {
+            println!("Wrong answer. Destruction cancelled.");
+            return Ok(());
+        }
+
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        guard.destroy_database()?;
+        println!("Database destroyed.");
+
+        Ok(())
+    }
+}
+
+struct Utils;
+
+impl Utils {
+    fn password_desc_valid(password: &str, description: &str) -> bool {
+        if password.len() < 3 {
+            return false;
+        }
+
+        let password_lower = password.to_lowercase();
+        let description_lower = description.to_lowercase();
+
+        if description_lower.contains(&password_lower) {
+            return true;
+        }
+
+        let password_chars: Vec<char> = password_lower.chars().collect();
+        let description_chars: Vec<char> = description_lower.chars().collect();
+
+        for window_size in (password.len().min(8)..=password.len()).rev() {
+            for window in password_chars.windows(window_size) {
+                let pattern: String = window.iter().collect();
+                if pattern.len() >= 3
+                    && description_chars.windows(window_size).any(|desc_window| {
+                        let desc_pattern: String = desc_window.iter().collect();
+                        desc_pattern == pattern
+                    })
+                {
+                    return true;
+                }
+            }
+        }
+
+        let regex_pattern = format!(r"(?i){}", regex::escape(password));
+        if let Ok(re) = Regex::new(&regex_pattern) {
+            if re.is_match(description) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn generate_math_puzzle() -> (String, i64) {
+        let mut rng = OsRng;
+
+        let ops = ["+", "-", "*", "/"];
+        let op1 = ops[(rng.next_u32() as usize) % ops.len()];
+        let op2 = ops[(rng.next_u32() as usize) % ops.len()];
+
+        let min_a = 10u32;
+        let max_a = 100u32;
+        let min_b = 5u32;
+        let max_b = 50u32;
+        let min_c = 3u32;
+        let max_c = 40u32;
+
+        let mut a: i64;
+        let mut b: i64;
+        let mut c: i64;
+        let mut intermediate: i64;
+
+        loop {
+            a = ((rng.next_u32() % (max_a - min_a + 1)) + min_a) as i64;
+            b = ((rng.next_u32() % (max_b - min_b + 1)) + min_b) as i64;
+            c = ((rng.next_u32() % (max_c - min_c + 1)) + min_c) as i64;
+
+            if op1 == "/" {
+                if b == 0 {
+                    continue;
+                }
+                let quotient = (rng.next_u32() % 20 + 1) as i64;
+                a = b * quotient;
+            }
+
+            intermediate = match op1 {
+                "+" => a + b,
+                "-" => a - b,
+                "*" => a * b,
+                "/" => a / b,
+                _ => unreachable!(),
+            };
+
+            if op2 == "/" {
+                if c == 0 || intermediate % c != 0 || intermediate == 0 {
+                    continue;
+                }
+            }
+
+            break;
+        }
+
+        let answer = match op2 {
+            "+" => intermediate + c,
+            "-" => intermediate - c,
+            "*" => intermediate * c,
+            "/" => intermediate / c,
+            _ => unreachable!(),
+        };
+
+        (format!("({} {} {}) {} {}", a, op1, b, op2, c), answer)
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Init => Handler::handle_init(),
+        Commands::Add { name } => Handler::handle_add(name),
+        Commands::Get { name } => Handler::handle_get(name),
+        Commands::List => Handler::handle_list(),
+        Commands::Remove { name } => Handler::handle_remove(name),
+        Commands::Change { name } => Handler::handle_change(name),
+        Commands::Reset => Handler::handle_reset(),
+        Commands::Destroy => Handler::handle_destroy(),
+    }
+}

@@ -694,7 +694,16 @@ impl Handler {
     }
 
     fn handle_purge() -> Result<(), Box<dyn std::error::Error>> {
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        println!();
         println!("WARNING: This will permanently delete all stored passwords!");
+        println!();
 
         let (puzzle, answer) = Utils::generate_math_puzzle();
         println!("Solve this equation to confirm: {}", puzzle);
@@ -705,13 +714,6 @@ impl Handler {
         if user_num != answer {
             println!("Wrong answer. Destruction cancelled.");
             return Ok(());
-        }
-
-        let master_password = UserPrompt::password("Master password: ")?;
-        let guard = Cortex::new(&master_password)?;
-
-        if !guard.verify_master_password()? {
-            return Err("Authentication failed".into());
         }
 
         guard.purge_database()?;

@@ -622,6 +622,10 @@ impl Handler {
             return Err("Authentication failed".into());
         }
 
+        if guard.db.get(&name)?.is_none() {
+            return Err(format!("Entry '{}' does not exist.", name).into());
+        }
+
         let new_password = UserPrompt::text("New password: ")?;
 
         if new_password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
@@ -656,8 +660,6 @@ impl Handler {
 
         if guard.edit_password(&name, &SecureString::new(new_password), description)? {
             println!("Edited password for '{}'.", name);
-        } else {
-            println!("Not found: {}", name);
         }
 
         Ok(())

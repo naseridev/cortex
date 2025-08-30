@@ -14,6 +14,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use std::io::{self, Write};
 use sysinfo::{CpuExt, System, SystemExt};
 use zeroize::Zeroize;
 
@@ -433,29 +434,6 @@ impl Cortex {
     }
 }
 
-struct UserPrompt;
-
-impl UserPrompt {
-    fn password(prompt: &str) -> Result<SecureString, Box<dyn std::error::Error>> {
-        let password = rpassword::prompt_password(prompt)?;
-
-        if password.is_empty() {
-            return Err("Empty password not allowed".into());
-        }
-
-        Ok(SecureString::new(password))
-    }
-
-    fn text(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
-        use std::io::{self, Write};
-        print!("{}", prompt);
-        io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        Ok(input.trim().to_string())
-    }
-}
-
 struct Handler;
 
 impl Handler {
@@ -492,6 +470,11 @@ impl Handler {
     }
 
     fn handle_create(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -547,6 +530,11 @@ impl Handler {
     }
 
     fn handle_get(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -569,6 +557,11 @@ impl Handler {
     }
 
     fn handle_list() -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -594,6 +587,11 @@ impl Handler {
     }
 
     fn handle_delete(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -611,6 +609,11 @@ impl Handler {
     }
 
     fn handle_edit(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -662,6 +665,11 @@ impl Handler {
     }
 
     fn handle_reset() -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let old_password = UserPrompt::password("Current master password: ")?;
         let guard = Cortex::new(&old_password)?;
 
@@ -692,6 +700,11 @@ impl Handler {
     }
 
     fn handle_purge() -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -718,6 +731,30 @@ impl Handler {
         println!("Database purged.");
 
         Ok(())
+    }
+}
+
+struct UserPrompt;
+
+impl UserPrompt {
+    fn password(prompt: &str) -> Result<SecureString, Box<dyn std::error::Error>> {
+        let password = rpassword::prompt_password(prompt)?;
+
+        if password.is_empty() {
+            return Err("Empty password not allowed".into());
+        }
+
+        Ok(SecureString::new(password))
+    }
+
+    fn text(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {
+        print!("{}", prompt);
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        Ok(input.trim().to_string())
     }
 }
 

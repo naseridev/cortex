@@ -621,44 +621,58 @@ impl Handler {
             return Err("Authentication failed".into());
         }
 
-        if guard.db.get(&name)?.is_none() {
-            return Err(format!("Entry '{}' does not exist.", name).into());
-        }
+        let current_entry = match guard.get_password(&name)? {
+            Some((password, description)) => (password, description),
+            None => return Err(format!("Entry '{}' does not exist.", name).into()),
+        };
 
-        let new_password = UserPrompt::text("New password: ")?;
-
-        if new_password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
-            return Err(format!(
-                "Password must be at least {} characters",
-                MIN_ACCOUNT_PASSWORD_LENGTH
-            )
-            .into());
-        }
-
-        let confirm_password = UserPrompt::text("Confirm new password: ")?;
-
-        if new_password.as_str() != confirm_password.as_str() {
-            return Err("Password mismatch".into());
-        }
-
-        let description_input = UserPrompt::text("New description (optional): ")?;
-        let description = if description_input.is_empty() {
-            None
-        } else if description_input.len() > MAX_DESCRIPTION_LENGTH {
-            return Err(format!(
-                "Description too long (max {} chars)",
-                MAX_DESCRIPTION_LENGTH
-            )
-            .into());
-        } else if Utils::password_desc_valid(new_password.as_str(), &description_input) {
-            eprintln!("Error: Description cannot contain the password or parts of it.");
-            process::exit(1);
+        let new_password_input = UserPrompt::text("New password (Enter to keep current): ")?;
+        let new_password = if new_password_input.is_empty() {
+            current_entry.0.as_str().to_string()
         } else {
+            if new_password_input.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
+                return Err(format!(
+                    "Password must be at least {} characters",
+                    MIN_ACCOUNT_PASSWORD_LENGTH
+                )
+                .into());
+            }
+
+            let confirm_password = UserPrompt::text("Confirm new password: ")?;
+            if new_password_input != confirm_password {
+                return Err("Password mismatch".into());
+            }
+
+            new_password_input
+        };
+
+        let description_input = UserPrompt::text("New description (Enter to keep current): ")?;
+        let description = if description_input.is_empty() {
+            current_entry.1.as_deref()
+        } else {
+            if description_input.len() > MAX_DESCRIPTION_LENGTH {
+                return Err(format!(
+                    "Description too long (max {} chars)",
+                    MAX_DESCRIPTION_LENGTH
+                )
+                .into());
+            }
+
+            if Utils::password_desc_valid(&new_password, &description_input) {
+                eprintln!("Error: Description cannot contain the password or parts of it.");
+                process::exit(1);
+            }
+
             Some(description_input.as_str())
         };
 
+        if new_password == current_entry.0.as_str() && description == current_entry.1.as_deref() {
+            println!("No changes made to '{}'.", name);
+            return Ok(());
+        }
+
         if guard.edit_password(&name, &SecureString::new(new_password), description)? {
-            println!("Edited password for '{}'.", name);
+            println!("Edited for '{}'.", name);
         }
 
         Ok(())

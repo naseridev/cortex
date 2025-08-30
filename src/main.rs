@@ -511,7 +511,7 @@ impl Handler {
             process::exit(1);
         }
 
-        let password = UserPrompt::password("Password to store: ")?;
+        let password = UserPrompt::text("Password to store: ")?;
 
         if password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
             return Err(format!(
@@ -521,7 +521,7 @@ impl Handler {
             .into());
         }
 
-        let confirm_password = UserPrompt::password("Confirm password: ")?;
+        let confirm_password = UserPrompt::text("Confirm password: ")?;
 
         if password.as_str() != confirm_password.as_str() {
             return Err("Password mismatch".into());
@@ -543,7 +543,7 @@ impl Handler {
             Some(description_input.as_str())
         };
 
-        if guard.create_password(&name, &password, description)? {
+        if guard.create_password(&name, &SecureString::new(password), description)? {
             println!("Created '{}'.", name);
         }
 
@@ -622,7 +622,7 @@ impl Handler {
             return Err("Authentication failed".into());
         }
 
-        let new_password = UserPrompt::password("New password: ")?;
+        let new_password = UserPrompt::text("New password: ")?;
 
         if new_password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
             return Err(format!(
@@ -632,7 +632,7 @@ impl Handler {
             .into());
         }
 
-        let confirm_password = UserPrompt::password("Confirm new password: ")?;
+        let confirm_password = UserPrompt::text("Confirm new password: ")?;
 
         if new_password.as_str() != confirm_password.as_str() {
             return Err("Password mismatch".into());
@@ -654,7 +654,7 @@ impl Handler {
             Some(description_input.as_str())
         };
 
-        if guard.edit_password(&name, &new_password, description)? {
+        if guard.edit_password(&name, &SecureString::new(new_password), description)? {
             println!("Edited password for '{}'.", name);
         } else {
             println!("Not found: {}", name);

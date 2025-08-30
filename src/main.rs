@@ -719,7 +719,7 @@ impl Handler {
         let (puzzle, answer) = Utils::generate_math_puzzle();
         println!("Solve this equation to confirm: {}", puzzle);
 
-        let user_answer = UserPrompt::password("Answer: ")?;
+        let user_answer = UserPrompt::text("Answer: ")?;
         let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
 
         if user_num != answer {
@@ -803,61 +803,37 @@ impl Utils {
     fn generate_math_puzzle() -> (String, i64) {
         let mut rng = OsRng;
 
-        let ops = ["+", "-", "*", "/"];
-        let op1 = ops[(rng.next_u32() as usize) % ops.len()];
-        let op2 = ops[(rng.next_u32() as usize) % ops.len()];
-
-        let min_a = 10u32;
-        let max_a = 100u32;
-        let min_b = 5u32;
-        let max_b = 50u32;
-        let min_c = 3u32;
-        let max_c = 40u32;
-
-        let mut a: i64;
-        let mut b: i64;
-        let mut c: i64;
-        let mut intermediate: i64;
-
         loop {
-            a = ((rng.next_u32() % (max_a - min_a + 1)) + min_a) as i64;
-            b = ((rng.next_u32() % (max_b - min_b + 1)) + min_b) as i64;
-            c = ((rng.next_u32() % (max_c - min_c + 1)) + min_c) as i64;
+            let a = (rng.next_u32() % 91 + 10) as i64;
+            let b = (rng.next_u32() % 46 + 5) as i64;
+            let c = (rng.next_u32() % 38 + 3) as i64;
 
-            if op1 == "/" {
-                if b == 0 {
-                    continue;
-                }
-                let quotient = (rng.next_u32() % 20 + 1) as i64;
-                a = b * quotient;
-            }
+            let ops = ["+", "-", "*"];
+            let op1 = ops[(rng.next_u32() as usize) % ops.len()];
+            let op2 = ops[(rng.next_u32() as usize) % ops.len()];
 
-            intermediate = match op1 {
+            let intermediate = match op1 {
                 "+" => a + b,
                 "-" => a - b,
                 "*" => a * b,
-                "/" => a / b,
                 _ => unreachable!(),
             };
 
-            if op2 == "/" {
-                if c == 0 || intermediate % c != 0 || intermediate == 0 {
-                    continue;
-                }
+            if intermediate <= 0 {
+                continue;
             }
 
-            break;
+            let answer = match op2 {
+                "+" => intermediate + c,
+                "-" => intermediate - c,
+                "*" => intermediate * c,
+                _ => unreachable!(),
+            };
+
+            if answer > 0 {
+                return (format!("({} {} {}) {} {}", a, op1, b, op2, c), answer);
+            }
         }
-
-        let answer = match op2 {
-            "+" => intermediate + c,
-            "-" => intermediate - c,
-            "*" => intermediate * c,
-            "/" => intermediate / c,
-            _ => unreachable!(),
-        };
-
-        (format!("({} {} {}) {} {}", a, op1, b, op2, c), answer)
     }
 }
 

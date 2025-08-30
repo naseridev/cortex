@@ -14,7 +14,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use sysinfo::{ComponentExt, CpuExt, System, SystemExt};
+use sysinfo::{CpuExt, System, SystemExt};
 use zeroize::Zeroize;
 
 const INIT_MARKER: &str = "__init__";
@@ -410,10 +410,6 @@ impl Cortex {
 
         if let Some(cpu) = sys.cpus().first() {
             hasher.update(cpu.brand().as_bytes());
-        }
-
-        for component in sys.components() {
-            hasher.update(component.label().as_bytes());
         }
 
         hasher.update(HARDWARE_SALT);

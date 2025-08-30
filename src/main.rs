@@ -544,7 +544,7 @@ impl Handler {
         };
 
         if guard.create_password(&name, &password, description)? {
-            println!("Created '{}'", name);
+            println!("Created '{}'.", name);
         }
 
         Ok(())
@@ -560,6 +560,7 @@ impl Handler {
 
         match guard.get_password(&name)? {
             Some((password, description)) => {
+                println!();
                 println!("{}: {}", name, password.as_str());
                 if let Some(desc) = description {
                     println!("Description: {}", desc);
@@ -585,10 +586,10 @@ impl Handler {
             println!("No entries");
         } else {
             for (name, description) in entries {
-                if let Some(desc) = description {
-                    println!("  {} - {}", name, desc);
-                } else {
-                    println!("  {}", name);
+                println!();
+                println!("Entry: {}", name);
+                if let Some(desc) = &description {
+                    println!("Description: {}", desc);
                 }
             }
         }
@@ -605,7 +606,7 @@ impl Handler {
         }
 
         if guard.delete_password(&name)? {
-            println!("Deleted '{}'", name);
+            println!("Deleted '{}'.", name);
         } else {
             println!("Not found: {}", name);
         }
@@ -637,7 +638,7 @@ impl Handler {
             return Err("Password mismatch".into());
         }
 
-        let description_input = UserPrompt::text("New description (optional, max 72 chars): ")?;
+        let description_input = UserPrompt::text("New description (optional): ")?;
         let description = if description_input.is_empty() {
             None
         } else if description_input.len() > MAX_DESCRIPTION_LENGTH {
@@ -654,7 +655,7 @@ impl Handler {
         };
 
         if guard.edit_password(&name, &new_password, description)? {
-            println!("Edited password for '{}'", name);
+            println!("Edited password for '{}'.", name);
         } else {
             println!("Not found: {}", name);
         }

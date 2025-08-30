@@ -21,7 +21,6 @@ use zeroize::Zeroize;
 const INIT_MARKER: &str = "__init__";
 const TEST_DATA: &[u8] = b"cortex_secure_init_marker";
 const HARDWARE_SALT: &[u8] = b"cortex_hw_salt";
-const MAX_DESCRIPTION_LENGTH: usize = 72;
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 const MIN_MASTER_PASSWORD_LENGTH: usize = 8;
 
@@ -509,12 +508,6 @@ impl Handler {
         let description_input = UserPrompt::text("Description (optional): ")?;
         let description = if description_input.is_empty() {
             None
-        } else if description_input.len() > MAX_DESCRIPTION_LENGTH {
-            return Err(format!(
-                "Description too long (max {} chars)",
-                MAX_DESCRIPTION_LENGTH
-            )
-            .into());
         } else if Utils::password_desc_valid(password.as_str(), &description_input) {
             eprintln!("Error: Description cannot contain the password or parts of it.");
             process::exit(1);
@@ -650,14 +643,6 @@ impl Handler {
         let description = if description_input.is_empty() {
             current_entry.1.as_deref()
         } else {
-            if description_input.len() > MAX_DESCRIPTION_LENGTH {
-                return Err(format!(
-                    "Description too long (max {} chars)",
-                    MAX_DESCRIPTION_LENGTH
-                )
-                .into());
-            }
-
             if Utils::password_desc_valid(&new_password, &description_input) {
                 eprintln!("Error: Description cannot contain the password or parts of it.");
                 process::exit(1);
@@ -758,6 +743,10 @@ impl UserPrompt {
             return Err("Empty password not allowed".into());
         }
 
+        if password.len() > 128 {
+            return Err("Password too long (max 128 chars)".into());
+        }
+
         Ok(SecureString::new(password))
     }
 
@@ -768,7 +757,13 @@ impl UserPrompt {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
-        Ok(input.trim().to_string())
+        let trimmed = input.trim().to_string();
+
+        if trimmed.len() > 72 {
+            return Err("Input too long (max 72 chars)".into());
+        }
+
+        Ok(trimmed)
     }
 }
 

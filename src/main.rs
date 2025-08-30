@@ -22,7 +22,6 @@ const INIT_MARKER: &str = "__init__";
 const TEST_DATA: &[u8] = b"cortex_secure_init_marker";
 const HARDWARE_SALT: &[u8] = b"cortex_hw_salt";
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
-const MIN_MASTER_PASSWORD_LENGTH: usize = 8;
 
 #[derive(Parser)]
 #[command(
@@ -104,10 +103,6 @@ impl SecureString {
 
     fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
     }
 }
 
@@ -446,12 +441,9 @@ impl Handler {
 
         let master_password = UserPrompt::password("Master password: ")?;
 
-        if master_password.len() < MIN_MASTER_PASSWORD_LENGTH {
-            return Err(format!(
-                "Master password must be at least {} characters",
-                MIN_MASTER_PASSWORD_LENGTH
-            )
-            .into());
+        if let Err(msg) = Utils::validate_password_security(master_password.as_str()) {
+            eprintln!("Error: {}", msg);
+            process::exit(1);
         }
 
         let confirm_password = UserPrompt::password("Confirm password: ")?;
@@ -678,12 +670,9 @@ impl Handler {
 
         let new_password = UserPrompt::password("New master password: ")?;
 
-        if new_password.len() < MIN_MASTER_PASSWORD_LENGTH {
-            return Err(format!(
-                "Master password must be at least {} characters",
-                MIN_MASTER_PASSWORD_LENGTH
-            )
-            .into());
+        if let Err(msg) = Utils::validate_password_security(new_password.as_str()) {
+            eprintln!("Error: {}", msg);
+            process::exit(1);
         }
 
         let confirm_password = UserPrompt::password("Confirm new password: ")?;
@@ -770,6 +759,39 @@ impl UserPrompt {
 struct Utils;
 
 impl Utils {
+    fn validate_password_security(password: &str) -> Result<(), String> {
+        if password.len() < 8 {
+            return Err("Password must be at least 8 characters long".to_string());
+        }
+
+        let mut missing = Vec::new();
+
+        if !password.chars().any(|c| c.is_lowercase()) {
+            missing.push("lowercase letter");
+        }
+
+        if !password.chars().any(|c| c.is_uppercase()) {
+            missing.push("uppercase letter");
+        }
+
+        if !password.chars().any(|c| c.is_ascii_digit()) {
+            missing.push("digit");
+        }
+
+        if !password
+            .chars()
+            .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c))
+        {
+            missing.push("special character");
+        }
+
+        if missing.len() > 1 {
+            return Err(format!("Password needs: {}", missing.join(", ")));
+        }
+
+        Ok(())
+    }
+
     fn password_desc_valid(password: &str, description: &str) -> bool {
         if password.len() < 3 {
             return false;

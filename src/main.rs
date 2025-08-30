@@ -42,8 +42,8 @@ enum Commands {
     #[command(about = "Initialize a new password database with master password")]
     Init,
 
-    #[command(about = "Add a new password entry")]
-    Add {
+    #[command(about = "Create a new password entry")]
+    Create {
         #[arg(help = "Name/identifier for the password entry")]
         name: String,
     },
@@ -57,23 +57,23 @@ enum Commands {
     #[command(about = "List all stored password entries")]
     List,
 
-    #[command(about = "Remove a password entry")]
-    Remove {
-        #[arg(help = "Name of the password entry to remove")]
+    #[command(about = "Delete a password entry")]
+    Delete {
+        #[arg(help = "Name of the password entry to delete")]
         name: String,
     },
 
-    #[command(about = "Change password and description for existing entry")]
-    Change {
-        #[arg(help = "Name of the password entry to change")]
+    #[command(about = "Edit password and description for existing entry")]
+    Edit {
+        #[arg(help = "Name of the password entry to edit")]
         name: String,
     },
 
     #[command(about = "Reset the master password")]
     Reset,
 
-    #[command(about = "Permanently destroy the entire password database")]
-    Destroy,
+    #[command(about = "Permanently purge the entire password database")]
+    Purge,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -213,7 +213,7 @@ impl Cortex {
         }
     }
 
-    fn add_password(
+    fn create_password(
         &self,
         name: &str,
         password: &SecureString,
@@ -264,7 +264,7 @@ impl Cortex {
         Ok(entries)
     }
 
-    fn remove_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    fn delete_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
         if name.starts_with("__") {
             return Ok(false);
         }
@@ -278,7 +278,7 @@ impl Cortex {
         }
     }
 
-    fn change_password(
+    fn edit_password(
         &self,
         name: &str,
         new_password: &SecureString,
@@ -377,7 +377,7 @@ impl Cortex {
         })
     }
 
-    fn destroy_database(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn purge_database(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.db.clear()?;
         self.db.flush()?;
 
@@ -495,7 +495,7 @@ impl Handler {
         Ok(())
     }
 
-    fn handle_add(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_create(name: String) -> Result<(), Box<dyn std::error::Error>> {
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -505,7 +505,7 @@ impl Handler {
 
         if guard.db.get(&name)?.is_some() {
             eprintln!(
-                "Error: Account '{}' already exists. Use 'change' to update or choose a different name.",
+                "Error: Account '{}' already exists. Use 'edit' to update or choose a different name.",
                 name
             );
             process::exit(1);
@@ -543,8 +543,8 @@ impl Handler {
             Some(description_input.as_str())
         };
 
-        if guard.add_password(&name, &password, description)? {
-            println!("Added '{}'", name);
+        if guard.create_password(&name, &password, description)? {
+            println!("Created '{}'", name);
         }
 
         Ok(())
@@ -596,7 +596,7 @@ impl Handler {
         Ok(())
     }
 
-    fn handle_remove(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_delete(name: String) -> Result<(), Box<dyn std::error::Error>> {
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -604,8 +604,8 @@ impl Handler {
             return Err("Authentication failed".into());
         }
 
-        if guard.remove_password(&name)? {
-            println!("Removed '{}'", name);
+        if guard.delete_password(&name)? {
+            println!("Deleted '{}'", name);
         } else {
             println!("Not found: {}", name);
         }
@@ -613,7 +613,7 @@ impl Handler {
         Ok(())
     }
 
-    fn handle_change(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_edit(name: String) -> Result<(), Box<dyn std::error::Error>> {
         let master_password = UserPrompt::password("Master password: ")?;
         let guard = Cortex::new(&master_password)?;
 
@@ -653,8 +653,8 @@ impl Handler {
             Some(description_input.as_str())
         };
 
-        if guard.change_password(&name, &new_password, description)? {
-            println!("Changed password for '{}'", name);
+        if guard.edit_password(&name, &new_password, description)? {
+            println!("Edited password for '{}'", name);
         } else {
             println!("Not found: {}", name);
         }
@@ -692,7 +692,7 @@ impl Handler {
         Ok(())
     }
 
-    fn handle_destroy() -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_purge() -> Result<(), Box<dyn std::error::Error>> {
         println!("WARNING: This will permanently delete all stored passwords!");
 
         let (puzzle, answer) = Utils::generate_math_puzzle();
@@ -713,8 +713,8 @@ impl Handler {
             return Err("Authentication failed".into());
         }
 
-        guard.destroy_database()?;
-        println!("Database destroyed.");
+        guard.purge_database()?;
+        println!("Database purged.");
 
         Ok(())
     }
@@ -828,12 +828,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Init => Handler::handle_init(),
-        Commands::Add { name } => Handler::handle_add(name),
+        Commands::Create { name } => Handler::handle_create(name),
         Commands::Get { name } => Handler::handle_get(name),
         Commands::List => Handler::handle_list(),
-        Commands::Remove { name } => Handler::handle_remove(name),
-        Commands::Change { name } => Handler::handle_change(name),
+        Commands::Delete { name } => Handler::handle_delete(name),
+        Commands::Edit { name } => Handler::handle_edit(name),
         Commands::Reset => Handler::handle_reset(),
-        Commands::Destroy => Handler::handle_destroy(),
+        Commands::Purge => Handler::handle_purge(),
     }
 }

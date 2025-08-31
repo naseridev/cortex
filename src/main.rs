@@ -14,7 +14,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use sysinfo::{CpuExt, System, SystemExt};
 use zeroize::Zeroize;
 
@@ -80,6 +80,9 @@ enum Commands {
         names_only: bool,
     },
 
+    #[command(about = "Export all passwords to plain text file")]
+    Export,
+
     #[command(about = "Reset the master password")]
     Reset,
 
@@ -133,6 +136,20 @@ enum Commands {
         )]
         no_ambiguous: bool,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExportData {
+    version: String,
+    timestamp: u64,
+    entries: Vec<ExportEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExportEntry {
+    name: String,
+    password: String,
+    description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -550,6 +567,81 @@ impl Cortex {
             .unwrap()
             .as_secs()
     }
+
+    fn export_passwords(&self, output_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        let file = std::fs::File::create(output_path)?;
+        let mut writer = BufWriter::with_capacity(64 * 1024, file);
+
+        writeln!(writer, "# Cortex Password Export\n")?;
+
+        let mut processed = 0;
+        let mut failed = 0;
+
+        for item in self.db.iter() {
+            let (key, value) = match item {
+                Ok((k, v)) => (k, v),
+                Err(_) => continue,
+            };
+
+            let key_str = String::from_utf8_lossy(&key);
+            if key_str.starts_with("__") {
+                continue;
+            }
+
+            processed += 1;
+
+            if processed % 1000 == 0 {
+                writer.flush()?;
+                eprint!("\rProcessed {} entries...", processed);
+                io::stderr().flush()?;
+            }
+
+            match bincode::deserialize::<PasswordEntry>(&value) {
+                Ok(entry) => match self.decrypt_and_write_entry(&mut writer, &key_str, &entry) {
+                    Ok(_) => {}
+                    Err(_) => failed += 1,
+                },
+                Err(_) => failed += 1,
+            }
+        }
+
+        writer.flush()?;
+
+        if processed >= 1000 {
+            eprintln!("\rCompleted {} entries.", processed);
+        }
+
+        if failed > 0 {
+            eprintln!("Warning: {} entries failed to decrypt", failed);
+        }
+
+        Ok(())
+    }
+
+    fn decrypt_and_write_entry(
+        &self,
+        writer: &mut BufWriter<std::fs::File>,
+        name: &str,
+        entry: &PasswordEntry,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let decrypted_bytes = self.decrypt_entry(entry)?;
+        let password = String::from_utf8(decrypted_bytes)?;
+
+        let description = self.decrypt_description(entry)?;
+
+        writeln!(writer, "Name: {}", name)?;
+        writeln!(writer, "Password: {}", password)?;
+
+        if let Some(desc) = description {
+            writeln!(writer, "Description: {}", desc)?;
+        }
+
+        writeln!(writer)?;
+
+        drop(password);
+
+        Ok(())
+    }
 }
 
 struct Handler;
@@ -847,6 +939,53 @@ impl Handler {
             Err(e) => {
                 eprintln!("Search failed: {}", e);
                 process::exit(1);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_export() -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        let (puzzle, answer) = Utils::generate_math_puzzle();
+
+        println!();
+        println!("WARNING: This will export all passwords in plain text format.");
+        println!("Solve this equation to confirm: {}", puzzle);
+        println!();
+
+        let user_answer = UserPrompt::text("Answer: ")?;
+        let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
+
+        if user_num != answer {
+            println!("Wrong answer. Export cancelled.");
+            return Ok(());
+        }
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let filename = format!("cortex_export_{:x}.dat", timestamp);
+        let output_path = PathBuf::from(filename);
+
+        match guard.export_passwords(&output_path) {
+            Ok(_) => println!("Export completed to {}", output_path.display()),
+            Err(e) => {
+                let _ = std::fs::remove_file(&output_path);
+                return Err(e);
             }
         }
 
@@ -1232,6 +1371,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ignore_case,
             names_only,
         } => Handler::handle_find(pattern, ignore_case, names_only),
+        Commands::Export => Handler::handle_export(),
         Commands::Reset => Handler::handle_reset(),
         Commands::Purge => Handler::handle_purge(),
         Commands::Pass {

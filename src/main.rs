@@ -394,7 +394,8 @@ impl Cortex {
         hasher.update(&hardware_id);
 
         let hash = hasher.finalize();
-        *Key::from_slice(&hash.as_bytes()[..32])
+        let key_bytes: [u8; 32] = hash.as_bytes()[..32].try_into().unwrap();
+        Key::from(key_bytes)
     }
 
     fn get_hardware_id() -> Vec<u8> {
@@ -500,7 +501,7 @@ impl Handler {
         let description_input = UserPrompt::text("Description (optional): ")?;
         let description = if description_input.is_empty() {
             None
-        } else if Utils::password_desc_valid(password.as_str(), &description_input) {
+        } else if Utils::password_in_desc_found(password.as_str(), &description_input) {
             eprintln!("Error: Description cannot contain the password or parts of it.");
             process::exit(1);
         } else {
@@ -635,7 +636,7 @@ impl Handler {
         let description = if description_input.is_empty() {
             current_entry.1.as_deref()
         } else {
-            if Utils::password_desc_valid(&new_password, &description_input) {
+            if Utils::password_in_desc_found(&new_password, &description_input) {
                 eprintln!("Error: Description cannot contain the password or parts of it.");
                 process::exit(1);
             }
@@ -786,13 +787,17 @@ impl Utils {
         }
 
         if missing.len() > 1 {
-            return Err(format!("Password needs: {}", missing.join(", ")));
+            return Err(format!(
+                "Password must contain at least 3 of these 4 types: {}. Missing: {}",
+                "lowercase, uppercase, digit, special character",
+                missing.join(", ")
+            ));
         }
 
         Ok(())
     }
 
-    fn password_desc_valid(password: &str, description: &str) -> bool {
+    fn password_in_desc_found(password: &str, description: &str) -> bool {
         if password.len() < 3 {
             return false;
         }

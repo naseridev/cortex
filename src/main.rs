@@ -68,6 +68,18 @@ enum Commands {
         name: String,
     },
 
+    #[command(about = "Search password entries by name or description")]
+    Find {
+        #[arg(help = "Search pattern (supports regex)")]
+        pattern: String,
+
+        #[arg(short, long, help = "Case insensitive search")]
+        ignore_case: bool,
+
+        #[arg(short, long, help = "Search only in names (not descriptions)")]
+        names_only: bool,
+    },
+
     #[command(about = "Reset the master password")]
     Reset,
 
@@ -288,6 +300,69 @@ impl Cortex {
         self.db.flush()?;
 
         Ok(true)
+    }
+
+    fn search_entries(
+        &self,
+        pattern: &str,
+        ignore_case: bool,
+        names_only: bool,
+    ) -> Result<Vec<(String, Option<String>, bool, bool)>, Box<dyn std::error::Error>> {
+        if pattern.trim().is_empty() {
+            return Err("Search pattern cannot be empty".into());
+        }
+
+        if pattern.len() > 100 {
+            return Err("Search pattern too long (max 100 chars)".into());
+        }
+
+        let regex_flags = if ignore_case { "(?i)" } else { "" };
+        let full_pattern = format!("{}{}", regex_flags, regex::escape(pattern));
+        let re = Regex::new(&full_pattern).map_err(|e| format!("Invalid search pattern: {}", e))?;
+
+        let mut results = Vec::new();
+        let mut processed = 0;
+
+        for item in self.db.iter() {
+            let (key, value) = item?;
+            let key_str = String::from_utf8_lossy(&key).to_string();
+
+            if key_str.starts_with("__") {
+                continue;
+            }
+
+            processed += 1;
+            if processed > 10000 {
+                return Err("Too many entries to search".into());
+            }
+
+            let name_match = re.is_match(&key_str);
+
+            let (description, desc_match) = if names_only {
+                (None, false)
+            } else if name_match {
+                let entry: PasswordEntry = bincode::deserialize(&value)?;
+                let desc = self.decrypt_description(&entry).unwrap_or(None);
+                (desc, false)
+            } else {
+                let entry: PasswordEntry = bincode::deserialize(&value)?;
+                match self.decrypt_description(&entry) {
+                    Ok(Some(desc)) => {
+                        let desc_match = re.is_match(&desc);
+                        (Some(desc), desc_match)
+                    }
+                    Ok(None) => (None, false),
+                    Err(_) => continue,
+                }
+            };
+
+            if name_match || desc_match {
+                results.push((key_str, description, name_match, desc_match));
+            }
+        }
+
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(results)
     }
 
     fn reset_master_password(
@@ -656,6 +731,80 @@ impl Handler {
         Ok(())
     }
 
+    fn handle_find(
+        pattern: String,
+        ignore_case: bool,
+        names_only: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !Cortex::get_db_path().exists() {
+            eprintln!("Database not initialized. Use 'init' command.");
+            process::exit(1);
+        }
+
+        if pattern.trim().is_empty() {
+            eprintln!("Error: Search pattern cannot be empty.");
+            process::exit(1);
+        }
+
+        let master_password = UserPrompt::password("Master password: ")?;
+        let guard = Cortex::new(&master_password)?;
+
+        if !guard.verify_master_password()? {
+            return Err("Authentication failed".into());
+        }
+
+        match guard.search_entries(&pattern, ignore_case, names_only) {
+            Ok(results) => {
+                if results.is_empty() {
+                    println!("No matches found for: {}", pattern);
+                    return Ok(());
+                }
+
+                println!();
+                println!("Found {} match(es) for: {}", results.len(), pattern);
+
+                if results.len() > 20 {
+                    println!("(Showing first 20 results)");
+                }
+
+                println!();
+
+                for (name, description, name_match, desc_match) in results.iter().take(20) {
+                    println!("Entry: {}", name);
+
+                    if *name_match && *desc_match {
+                        println!("  >> Matches: name and description");
+                    } else if *name_match {
+                        println!("  >> Matches: name");
+                    } else if *desc_match {
+                        println!("  >> Matches: description");
+                    }
+
+                    if let Some(desc) = description {
+                        let display_desc = if desc.len() > 60 {
+                            format!("{}...", &desc[..57])
+                        } else {
+                            desc.clone()
+                        };
+                        println!("  Description: {}", display_desc);
+                    }
+
+                    println!();
+                }
+
+                if results.len() > 20 {
+                    println!("... and {} more results", results.len() - 20);
+                }
+            }
+            Err(e) => {
+                eprintln!("Search failed: {}", e);
+                process::exit(1);
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_reset() -> Result<(), Box<dyn std::error::Error>> {
         if !Cortex::get_db_path().exists() {
             eprintln!("Database not initialized. Use 'init' command.");
@@ -883,6 +1032,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::List => Handler::handle_list(),
         Commands::Delete { name } => Handler::handle_delete(name),
         Commands::Edit { name } => Handler::handle_edit(name),
+        Commands::Find {
+            pattern,
+            ignore_case,
+            names_only,
+        } => Handler::handle_find(pattern, ignore_case, names_only),
         Commands::Reset => Handler::handle_reset(),
         Commands::Purge => Handler::handle_purge(),
     }

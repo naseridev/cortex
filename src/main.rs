@@ -20,7 +20,7 @@ use zeroize::Zeroize;
 
 const INIT_MARKER: &str = "__init__";
 const TEST_DATA: &[u8] = b"cortex_secure_init_marker";
-const HARDWARE_SALT: &[u8] = b"cortex_hw_salt";
+const HARDWARE_SALT: &[u8] = b"classified_eyes_only";
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 
 #[derive(Parser)]

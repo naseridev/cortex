@@ -27,7 +27,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 #[command(
     name = "cortex",
     about = "Keep your passwords safe",
-    version = "1.0.0",
+    version = "2.0.0",
     author = "Nima Naseri <nerdnull@proton.me>"
 )]
 #[command(long_about = "A no-nonsense password manager using hardware-backed key derivation.")]

@@ -27,7 +27,7 @@ impl UserPrompt {
 
         let trimmed = input.trim().to_string();
 
-        if trimmed.len() > 72 {
+        if trimmed.len() > 128 {
             return Err("Input too long (max 72 chars)".into());
         }
 

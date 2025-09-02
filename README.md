@@ -298,7 +298,7 @@ The database is automatically created in the system's configuration directory:
 - **Hash Function**: BLAKE3 with hardware salt
 - **Database**: Sled embedded key-value store
 - **Memory Management**: Automatic secure clearing via Drop trait
-- **Input Limits**: 128 characters for passwords, 72 for descriptions and inputs
+- **Input Limits**: Input Limits: 128 characters for input fields
 - **Search Limits**: 100 characters for patterns, 10,000 entries maximum processing
 
 ## Command Reference

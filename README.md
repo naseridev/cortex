@@ -247,9 +247,9 @@ cortex find ""
 ## Configuration
 
 The database is automatically created in the system's configuration directory:
-- **Linux**: `~/.config/cortex/passwords.db`
-- **macOS**: `~/Library/Application Support/cortex/passwords.db`
-- **Windows**: `%APPDATA%/cortex/passwords.db`
+- **Linux**: `~/.config/cortex/.password-store`
+- **macOS**: `~/Library/Application Support/cortex/.password-store`
+- **Windows**: `%APPDATA%/cortex/.password-store`
 
 ## Security Considerations
 

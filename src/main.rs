@@ -39,15 +39,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             lowercase,
             digits,
             special,
-            no_ambiguous,
-        } => Pass::new(
-            length,
-            count,
-            uppercase,
-            lowercase,
-            digits,
-            special,
-            no_ambiguous,
-        ),
+        } => Pass::new(length, count, uppercase, lowercase, digits, special),
     }
 }

@@ -79,38 +79,16 @@ pub enum Commands {
         )]
         count: usize,
 
-        #[arg(
-            short = 'u',
-            long,
-            help = "Include uppercase letters",
-            default_value = "true"
-        )]
+        #[arg(short = 'u', long, help = "Include uppercase letters")]
         uppercase: bool,
 
-        #[arg(
-            short = 'l',
-            long,
-            help = "Include lowercase letters",
-            default_value = "true"
-        )]
+        #[arg(short = 'l', long, help = "Include lowercase letters")]
         lowercase: bool,
 
-        #[arg(short = 'd', long, help = "Include digits", default_value = "true")]
+        #[arg(short = 'd', long, help = "Include digits")]
         digits: bool,
 
-        #[arg(
-            short = 's',
-            long,
-            help = "Include special characters",
-            default_value = "true"
-        )]
+        #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
-
-        #[arg(
-            short = 'n',
-            long,
-            help = "Exclude ambiguous characters (0, O, l, 1, etc.)"
-        )]
-        no_ambiguous: bool,
     },
 }

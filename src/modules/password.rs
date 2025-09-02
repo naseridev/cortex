@@ -9,51 +9,37 @@ impl Password {
         lowercase: bool,
         digits: bool,
         special: bool,
-        no_ambiguous: bool,
     ) -> Result<String, String> {
         let mut charset = String::new();
         let mut required_chars = Vec::new();
 
-        if lowercase {
-            let lower = if no_ambiguous {
-                "abcdefghijkmnopqrstuvwxyz"
-            } else {
-                "abcdefghijklmnopqrstuvwxyz"
-            };
+        let any_flag_set = uppercase || lowercase || digits || special;
 
+        let use_lowercase = if any_flag_set { lowercase } else { true };
+        let use_uppercase = if any_flag_set { uppercase } else { true };
+        let use_digits = if any_flag_set { digits } else { true };
+        let use_special = if any_flag_set { special } else { true };
+
+        if use_lowercase {
+            let lower = "abcdefghijklmnopqrstuvwxyz";
             charset.push_str(lower);
             required_chars.push(Self::pick_random_char(lower)?);
         }
 
-        if uppercase {
-            let upper = if no_ambiguous {
-                "ABCDEFGHJKLMNPQRSTUVWXYZ"
-            } else {
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            };
-
+        if use_uppercase {
+            let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             charset.push_str(upper);
             required_chars.push(Self::pick_random_char(upper)?);
         }
 
-        if digits {
-            let nums = if no_ambiguous {
-                "23456789"
-            } else {
-                "0123456789"
-            };
-
+        if use_digits {
+            let nums = "0123456789";
             charset.push_str(nums);
             required_chars.push(Self::pick_random_char(nums)?);
         }
 
-        if special {
-            let specs = if no_ambiguous {
-                "!@#$%^&*()_+-={}[]|;:,.<>?"
-            } else {
-                "!@#$%^&*()_+-=[]{}|;:,.<>?"
-            };
-
+        if use_special {
+            let specs = "!@#$%^&*()_+-=[]{}|;:,.<>?";
             charset.push_str(specs);
             required_chars.push(Self::pick_random_char(specs)?);
         }

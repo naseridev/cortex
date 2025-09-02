@@ -250,7 +250,7 @@ impl Storage {
         path.push("cortex");
 
         std::fs::create_dir_all(&path).ok();
-        path.push("passwords.db");
+        path.push(".password-store");
         path
     }
 

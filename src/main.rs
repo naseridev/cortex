@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Init => Init::new(),
         Commands::Create { name } => Create::new(name),
-        Commands::Get { name } => Get::new(name),
+        Commands::Get { name, clip } => Get::new(name, clip),
         Commands::List => List::new(),
         Commands::Delete { name } => Delete::new(name),
         Commands::Edit { name } => Edit::new(name),

@@ -1,5 +1,6 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage},
+    modules::clipboard::Clipboard,
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -7,7 +8,7 @@ use std::process;
 pub struct Get;
 
 impl Get {
-    pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn new(name: String, clip: Option<Option<u64>>) -> Result<(), Box<dyn std::error::Error>> {
         if !Storage::get_db_path().exists() {
             eprintln!("Database not initialized. Use 'init' command.");
             process::exit(1);
@@ -33,10 +34,36 @@ impl Get {
                 let password = String::from_utf8(decrypted)?;
                 let description = crypto.decrypt_description(&entry)?;
 
-                println!();
-                println!("{}: {}", name, password.as_str());
-                if let Some(desc) = description {
-                    println!("Description: {}", desc);
+                if let Some(duration) = clip {
+                    let seconds = duration.unwrap_or(43);
+                    Clipboard::copy(password.as_str())?;
+
+                    if seconds > 540 || seconds < 3 {
+                        eprintln!(
+                            "Error: The time to be distracted is only allowed to be between 3 and 540 seconds"
+                        );
+                        process::exit(1);
+                    }
+
+                    println!();
+                    println!("Password copied to clipboard for {} seconds...", seconds);
+
+                    if let Some(desc) = description {
+                        println!("Description: {}", desc);
+                    }
+
+                    if Clipboard::clear(seconds, password.as_str()) {
+                        println!("Done.");
+                    } else {
+                        eprintln!("Error: The operation was not performed correctly");
+                        process::exit(1);
+                    }
+                } else {
+                    println!();
+                    println!("{}: {}", name, password.as_str());
+                    if let Some(desc) = description {
+                        println!("Description: {}", desc);
+                    }
                 }
             }
             None => println!("Not found: {}", name),

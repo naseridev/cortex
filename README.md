@@ -17,6 +17,7 @@ Cortex is a command-line password manager that uses ChaCha20-Poly1305 authentica
 - **Search Functionality**: Search entries by name or description with regex support
 - **Export Capability**: Export all passwords to plain text with security verification
 - **Password Validation**: Built-in checks to prevent weak passwords and information leakage
+- **Clipboard Security**: Copy passwords directly to clipboard with automatic clearing
 
 ## Security Architecture
 
@@ -101,7 +102,9 @@ cortex create "github-work"
 **Note**: Descriptions are limited to 72 characters and cannot contain the password or its fragments for security reasons.
 
 ### Retrieving Passwords
-Access stored passwords:
+Access stored passwords with enhanced security options:
+
+**Standard retrieval** (displays password in terminal):
 ```bash
 cortex get "github-work"
 # Prompts:
@@ -110,6 +113,33 @@ cortex get "github-work"
 # github-work: your_secure_password_123
 # Description: Work GitHub account for project X
 ```
+
+**Secure clipboard mode** (copies password to clipboard without displaying):
+```bash
+cortex get "github-work" --clip
+# Prompts:
+# Master password: [hidden input]
+# Output:
+# Password copied to clipboard. Will be cleared in 43 seconds.
+# Description: Work GitHub account for project X
+```
+
+**Custom clipboard timeout** (set custom auto-clear time):
+```bash
+cortex get "github-work" --clip 120
+# Prompts:
+# Master password: [hidden input]
+# Output:
+# Password copied to clipboard. Will be cleared in 120 seconds.
+# Description: Work GitHub account for project X
+```
+
+**Clipboard Options:**
+- `--clip`: Copy password to clipboard with default 43-second timeout
+- `--clip <seconds>`: Copy password to clipboard with custom timeout (3-540 seconds)
+- Password is automatically cleared from clipboard after the specified time
+- Description is still displayed for reference
+- No password appears in terminal history for enhanced security
 
 ### Listing All Entries
 View all stored password entries:
@@ -242,6 +272,10 @@ cortex create "secure-app"
 # Empty search pattern
 cortex find ""
 # Output: "Error: Search pattern cannot be empty."
+
+# Invalid clipboard timeout
+cortex get "account" --clip 600
+# Output: "Error: Clipboard timeout must be between 3 and 540 seconds."
 ```
 
 ## Configuration
@@ -260,6 +294,8 @@ The database is automatically created in the system's configuration directory:
 - **Information Leakage Prevention**: Descriptions cannot contain password fragments
 - **Export Security**: Mathematical puzzle verification required for sensitive operations
 - **Search Limitations**: Pattern length limits and result count restrictions to prevent abuse
+- **Clipboard Security**: Automatic clipboard clearing prevents password persistence in system clipboard
+- **Terminal History Protection**: Clipboard mode prevents passwords from appearing in shell history
 
 ## Password Security Requirements
 
@@ -290,6 +326,7 @@ The database is automatically created in the system's configuration directory:
 - `serde`: Serialization/deserialization
 - `bincode`: Binary serialization format
 - `dirs`: Standard directory locations
+- `clipboard`: Cross-platform clipboard management
 
 ## Technical Specifications
 
@@ -298,8 +335,9 @@ The database is automatically created in the system's configuration directory:
 - **Hash Function**: BLAKE3 with hardware salt
 - **Database**: Sled embedded key-value store
 - **Memory Management**: Automatic secure clearing via Drop trait
-- **Input Limits**: Input Limits: 128 characters for input fields
+- **Input Limits**: 128 characters for input fields
 - **Search Limits**: 100 characters for patterns, 10,000 entries maximum processing
+- **Clipboard Timeout**: 3-540 seconds range, 43 seconds default
 
 ## Command Reference
 
@@ -307,7 +345,7 @@ The database is automatically created in the system's configuration directory:
 |---------|---------|-----------|
 | `init` | Initialize new database | None |
 | `create <name>` | Create new password entry | Entry name |
-| `get <name>` | Retrieve password entry | Entry name |
+| `get <name>` | Retrieve password entry | Entry name, optional `--clip [seconds]` |
 | `list` | List all entries | None |
 | `delete <name>` | Delete password entry | Entry name |
 | `edit <name>` | Edit existing entry | Entry name |
@@ -316,7 +354,6 @@ The database is automatically created in the system's configuration directory:
 | `export` | Export all passwords | None |
 | `reset` | Change master password | None |
 | `purge` | Destroy entire database | None |
-
 ---
 
 ***Critical Warning**:* *This software binds encryption keys to hardware characteristics. Transferring the database to different hardware will result in permanent data loss. Always use the export function before hardware changes.*

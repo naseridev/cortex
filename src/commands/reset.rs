@@ -18,32 +18,45 @@ impl Reset {
             process::exit(1);
         }
 
-        let old_password = UserPrompt::password("Current master password: ")?;
+        let (storage, crypto) = loop {
+            let old_password = UserPrompt::password("Current master password: ")?;
+            let crypto = Crypto::new(&old_password);
+            let storage_attempt = Storage::new()?;
 
-        let crypto = Crypto::new(&old_password);
-        let storage = Storage::new()?;
+            let is_correct = match storage_attempt.get_init_marker()? {
+                Some(entry) => crypto.verify_test_data(&entry),
+                None => false,
+            };
 
-        let result = match storage.get_init_marker()? {
-            Some(entry) => crypto.verify_test_data(&entry),
-            None => false,
+            if is_correct {
+                break (storage_attempt, crypto);
+            } else {
+                eprintln!("Authentication failed. Please try again.");
+            }
         };
 
-        if !result {
-            return Err("Authentication failed".into());
-        }
+        let new_password = loop {
+            let password = UserPrompt::password("New master password: ")?;
 
-        let new_password = UserPrompt::password("New master password: ")?;
+            match Validation::password_security(password.as_str()) {
+                Ok(_) => {
+                    break password;
+                }
+                Err(msg) => {
+                    eprintln!("Error: {}", msg);
+                }
+            }
+        };
 
-        if let Err(msg) = Validation::password_security(new_password.as_str()) {
-            eprintln!("Error: {}", msg);
-            process::exit(1);
-        }
+        loop {
+            let password = UserPrompt::password("Confirm new password: ")?;
 
-        let confirm_password = UserPrompt::password("Confirm new password: ")?;
+            if new_password.as_str() == password.as_str() {
+                break
+            }
 
-        if new_password.as_str() != confirm_password.as_str() {
-            return Err("Password mismatch".into());
-        }
+            eprintln!("Password mismatch");
+        };
 
         let entries = storage.get_all_entries()?;
         let mut decrypted_entries = Vec::new();

@@ -17,18 +17,28 @@ impl Init {
             process::exit(1);
         }
 
-        let master_password = UserPrompt::password("Master password: ")?;
+        let master_password = loop {
+            let password = UserPrompt::password("Master password: ")?;
 
-        if let Err(msg) = Validation::password_security(master_password.as_str()) {
-            eprintln!("Error: {}", msg);
-            process::exit(1);
-        }
+            match Validation::password_security(password.as_str()) {
+                Ok(_) => {
+                    break password;
+                }
+                Err(msg) => {
+                    eprintln!("Error: {}", msg);
+                }
+            }
+        };
 
-        let confirm_password = UserPrompt::password("Confirm password: ")?;
+        loop {
+            let password = UserPrompt::password("Confirm password: ")?;
 
-        if master_password.as_str() != confirm_password.as_str() {
-            return Err("Password mismatch".into());
-        }
+            if master_password.as_str() == password.as_str() {
+                break
+            }
+
+            eprintln!("Password mismatch");
+        };
 
         let entry = Crypto::new(&master_password).create_entry(get_test_data(), None)?;
         let _ = Storage::new()?.init_db(&entry);

@@ -14,19 +14,27 @@ impl Get {
             process::exit(1);
         }
 
-        let master_password = UserPrompt::password("Master password: ")?;
+        let mut failure = 0;
 
-        let crypto = Crypto::new(&master_password);
-        let storage = Storage::new()?;
+        let (storage, crypto) = loop {
+            let master_password = UserPrompt::password("Master password: ")?;
+            let crypto = Crypto::new(&master_password);
+            let storage_attempt = Storage::new()?;
 
-        let result = match storage.get_init_marker()? {
-            Some(entry) => crypto.verify_test_data(&entry),
-            None => false,
+            let is_correct = match storage_attempt.get_init_marker()? {
+                Some(entry) => crypto.verify_test_data(&entry),
+                None => false,
+            };
+
+            if is_correct {
+                break (storage_attempt, crypto);
+            } else if failure > 1 {
+                return Err("Authentication failed".into());
+            } else {
+                eprintln!("Sorry, try again.\n");
+                failure += 1;
+            }
         };
-
-        if !result {
-            return Err("Authentication failed".into());
-        }
 
         match storage.get_password(&name)? {
             Some(entry) => {

@@ -18,26 +18,40 @@ impl Reset {
             process::exit(1);
         }
 
-        let old_password = UserPrompt::password("Current master password: ")?;
+        let mut failure = 0;
 
-        let crypto = Crypto::new(&old_password);
-        let storage = Storage::new()?;
+        let (storage, crypto) = loop {
+            let old_password = UserPrompt::password("Current master password: ")?;
+            let crypto = Crypto::new(&old_password);
+            let storage_attempt = Storage::new()?;
 
-        let result = match storage.get_init_marker()? {
-            Some(entry) => crypto.verify_test_data(&entry),
-            None => false,
+            let is_correct = match storage_attempt.get_init_marker()? {
+                Some(entry) => crypto.verify_test_data(&entry),
+                None => false,
+            };
+
+            if is_correct {
+                break (storage_attempt, crypto);
+            } else if failure > 1 {
+                return Err("Authentication failed".into());
+            } else {
+                eprintln!("Sorry, try again.\n");
+                failure += 1;
+            }
         };
 
-        if !result {
-            return Err("Authentication failed".into());
-        }
+        let new_password = loop {
+            let password = UserPrompt::password("New master password: ")?;
 
-        let new_password = UserPrompt::password("New master password: ")?;
-
-        if let Err(msg) = Validation::password_security(new_password.as_str()) {
-            eprintln!("Error: {}", msg);
-            process::exit(1);
-        }
+            match Validation::password_security(password.as_str()) {
+                Ok(_) => {
+                    break password;
+                }
+                Err(msg) => {
+                    eprintln!("Error: {}\n", msg);
+                }
+            }
+        };
 
         let confirm_password = UserPrompt::password("Confirm new password: ")?;
 

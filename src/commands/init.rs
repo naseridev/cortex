@@ -3,7 +3,7 @@ use crate::{
         crypto::{Crypto, get_test_data},
         storage::Storage,
     },
-    modules::validation::Validation,
+    modules::password::Password,
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -19,7 +19,7 @@ impl Init {
 
         let master_password = UserPrompt::password("Master password: ")?;
 
-        if let Err(msg) = Validation::password_security(master_password.as_str()) {
+        if let Err(msg) = Password::security_check(master_password.as_str()) {
             eprintln!("Error: {}", msg);
             process::exit(1);
         }

@@ -4,7 +4,7 @@ use crate::{
         storage::Storage,
         types::SecureString,
     },
-    modules::validation::Validation,
+    modules::password::Password,
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -43,7 +43,7 @@ impl Reset {
         let new_password = loop {
             let password = UserPrompt::password("New master password: ")?;
 
-            match Validation::password_security(password.as_str()) {
+            match Password::security_check(password.as_str()) {
                 Ok(_) => {
                     break password;
                 }

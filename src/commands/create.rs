@@ -1,6 +1,6 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage, types::SecureString},
-    modules::validation::Validation,
+    modules::password::Password,
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -65,7 +65,7 @@ impl Create {
         let description_input = UserPrompt::text("Description (optional): ")?;
         let description = if description_input.is_empty() {
             None
-        } else if Validation::password_in_desc_found(password.as_str(), &description_input) {
+        } else if Password::in_desc_found(password.as_str(), &description_input) {
             return Err("Description cannot contain the password or parts of it.".into());
         } else {
             Some(description_input.as_str())

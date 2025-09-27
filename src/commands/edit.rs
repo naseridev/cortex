@@ -1,6 +1,6 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage, types::SecureString},
-    modules::validation::Validation,
+    modules::password::Password,
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -78,7 +78,7 @@ impl Edit {
                 None => None,
             }
         } else {
-            if Validation::password_in_desc_found(&new_password, &description_input) {
+            if Password::in_desc_found(&new_password, &description_input) {
                 return Err("Description cannot contain the password or parts of it.".into());
             }
 

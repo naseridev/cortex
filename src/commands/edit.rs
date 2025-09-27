@@ -1,9 +1,8 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage, types::SecureString},
-    modules::password::Password,
+    modules::{password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
-use std::process;
 
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 
@@ -11,10 +10,7 @@ pub struct Edit;
 
 impl Edit {
     pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
-        if !Storage::get_db_path().exists() {
-            eprintln!("Database not initialized. Use 'init' command.");
-            process::exit(1);
-        }
+        Validation::storage_existence_probe()?;
 
         let mut failure = 0;
 

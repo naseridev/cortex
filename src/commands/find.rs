@@ -1,9 +1,9 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage},
+    modules::validation::Validation,
     ui::prompt::UserPrompt,
 };
 use regex::Regex;
-use std::process;
 
 pub struct Find;
 
@@ -13,10 +13,7 @@ impl Find {
         ignore_case: bool,
         names_only: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if !Storage::get_db_path().exists() {
-            eprintln!("Database not initialized. Use 'init' command.");
-            process::exit(1);
-        }
+        Validation::storage_existence_probe()?;
 
         let mut failure = 0;
 

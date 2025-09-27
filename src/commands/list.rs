@@ -1,7 +1,6 @@
-use std::process;
-
 use crate::{
     core::{crypto::Crypto, storage::Storage},
+    modules::validation::Validation,
     ui::prompt::UserPrompt,
 };
 
@@ -9,10 +8,7 @@ pub struct List;
 
 impl List {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
-        if !Storage::get_db_path().exists() {
-            eprintln!("Database not initialized. Use 'init' command.");
-            process::exit(1);
-        }
+        Validation::storage_existence_probe()?;
 
         let mut failure = 0;
 

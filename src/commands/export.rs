@@ -1,18 +1,16 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage, time::Time, types::PasswordEntry},
+    modules::validation::Validation,
     ui::prompt::UserPrompt,
     utils::security::Security,
 };
-use std::{fs::File, io::BufWriter, path::PathBuf, process};
+use std::{fs::File, io::BufWriter, path::PathBuf};
 
 pub struct Export;
 
 impl Export {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
-        if !Storage::get_db_path().exists() {
-            eprintln!("Database not initialized. Use 'init' command.");
-            process::exit(1);
-        }
+        Validation::storage_existence_probe()?;
 
         let mut failure = 0;
 

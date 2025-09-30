@@ -1,7 +1,6 @@
 use crate::{
-    core::{crypto::Crypto, storage::Storage, time::Time, types::PasswordEntry},
-    modules::validation::Validation,
-    ui::prompt::UserPrompt,
+    core::{time::Time, types::PasswordEntry},
+    modules::gateway::Gateway,
     utils::confirmation::Confirmation,
 };
 use std::{fs::File, io::BufWriter, path::PathBuf};
@@ -10,29 +9,7 @@ pub struct Export;
 
 impl Export {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
-        Validation::storage_existence_probe()?;
-
-        let mut failure = 0;
-
-        let (storage, crypto) = loop {
-            let master_password = UserPrompt::password("Master password: ")?;
-            let crypto = Crypto::new(&master_password);
-            let storage_attempt = Storage::new()?;
-
-            let is_correct = match storage_attempt.get_init_marker()? {
-                Some(entry) => crypto.verify_test_data(&entry),
-                None => false,
-            };
-
-            if is_correct {
-                break (storage_attempt, crypto);
-            } else if failure > 1 {
-                return Err("Authentication failed".into());
-            } else {
-                eprintln!("Sorry, try again.\n");
-                failure += 1;
-            }
-        };
+        let (storage, crypto) = Gateway::login()?;
 
         let warning_message = "This will export all passwords in plain text format.";
         let export_confirmation = Confirmation::require_math_puzzle(warning_message)?;

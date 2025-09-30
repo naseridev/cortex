@@ -2,7 +2,7 @@ use crate::{
     core::{crypto::Crypto, storage::Storage, time::Time, types::PasswordEntry},
     modules::validation::Validation,
     ui::prompt::UserPrompt,
-    utils::security::Security,
+    utils::confirmation::Confirmation,
 };
 use std::{fs::File, io::BufWriter, path::PathBuf};
 
@@ -34,17 +34,10 @@ impl Export {
             }
         };
 
-        let (puzzle, answer) = Security::generate_math_puzzle();
+        let warning_message = "This will export all passwords in plain text format.";
+        let export_confirmation = Confirmation::require_math_puzzle(warning_message)?;
 
-        println!();
-        println!("WARNING: This will export all passwords in plain text format.");
-        println!("Solve this equation to confirm: {}", puzzle);
-        println!();
-
-        let user_answer = UserPrompt::text("Answer: ")?;
-        let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
-
-        if user_num != answer {
+        if !export_confirmation {
             println!("Wrong answer. Export cancelled.");
             return Ok(());
         }

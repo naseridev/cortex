@@ -2,7 +2,7 @@ use crate::{
     core::{crypto::Crypto, storage::Storage},
     modules::validation::Validation,
     ui::prompt::UserPrompt,
-    utils::security::Security,
+    utils::confirmation::Confirmation,
 };
 
 pub struct Purge;
@@ -33,22 +33,15 @@ impl Purge {
             }
         };
 
-        println!();
-        println!("WARNING: This will permanently delete all stored passwords!");
-        println!();
+        let warning_message = "This will permanently delete all stored passwords!";
+        let purge_confirmation = Confirmation::require_math_puzzle(warning_message)?;
 
-        let (puzzle, answer) = Security::generate_math_puzzle();
-        println!("Solve this equation to confirm: {}", puzzle);
-
-        let user_answer = UserPrompt::text("Answer: ")?;
-        let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
-
-        if user_num != answer {
+        if !purge_confirmation {
             println!("Wrong answer. Destruction cancelled.");
             return Ok(());
         }
 
-        let _ = storage.purge_database();
+        storage.purge_database()?;
         println!("Database purged.");
 
         Ok(())

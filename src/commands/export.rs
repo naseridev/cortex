@@ -1,7 +1,6 @@
 use crate::{
     core::{time::Time, types::PasswordEntry},
-    modules::gateway::Gateway,
-    utils::confirmation::Confirmation,
+    modules::gateway::Gateway, utils::security::Security,
 };
 use std::{fs::File, io::BufWriter, path::PathBuf};
 
@@ -12,7 +11,7 @@ impl Export {
         let (storage, crypto) = Gateway::login()?;
 
         let warning_message = "This will export all passwords in plain text format.";
-        let export_confirmation = Confirmation::require_math_puzzle(warning_message)?;
+        let export_confirmation = Security::confirmation(warning_message)?;
 
         if !export_confirmation {
             println!("Wrong answer. Export cancelled.");

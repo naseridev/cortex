@@ -1,5 +1,7 @@
 use rand::{RngCore, rngs::OsRng};
 
+use crate::ui::prompt::UserPrompt;
+
 pub struct Security;
 
 impl Security {
@@ -37,5 +39,19 @@ impl Security {
                 return (format!("({} {} {}) {} {}", a, op1, b, op2, c), answer);
             }
         }
+    }
+
+    pub fn confirmation(warning_message: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        println!();
+        println!("WARNING: {}", warning_message);
+        println!();
+
+        let (puzzle, answer) = Self::generate_math_puzzle();
+        println!("Solve this equation to confirm: {}", puzzle);
+
+        let user_answer = UserPrompt::text("Answer: ")?;
+        let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
+
+        Ok(user_num == answer)
     }
 }

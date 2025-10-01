@@ -1,4 +1,4 @@
-use crate::{modules::gateway::Gateway, utils::confirmation::Confirmation};
+use crate::{modules::gateway::Gateway, utils::security::Security};
 
 pub struct Purge;
 
@@ -7,7 +7,7 @@ impl Purge {
         let storage = Gateway::login_storage_only()?;
 
         let warning_message = "This will permanently delete all stored passwords!";
-        let purge_confirmation = Confirmation::require_math_puzzle(warning_message)?;
+        let purge_confirmation = Security::confirmation(warning_message)?;
 
         if !purge_confirmation {
             println!("Wrong answer. Destruction cancelled.");

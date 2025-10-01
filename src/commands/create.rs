@@ -21,13 +21,7 @@ impl Create {
 
         let password = UserPrompt::text("Password to store: ")?;
 
-        if password.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
-            return Err(format!(
-                "Password must be at least {} characters",
-                MIN_ACCOUNT_PASSWORD_LENGTH
-            )
-            .into());
-        }
+        Validation::password_length_probe(&password, MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
         let confirm_password = UserPrompt::text("Confirm password: ")?;
 

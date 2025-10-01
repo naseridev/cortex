@@ -1,6 +1,6 @@
 use crate::{
     core::types::SecureString,
-    modules::{gateway::Gateway, password::Password},
+    modules::{gateway::Gateway, password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
 
@@ -29,13 +29,7 @@ impl Edit {
                 None => return Err("No current password found".into()),
             }
         } else {
-            if new_password_input.len() < MIN_ACCOUNT_PASSWORD_LENGTH {
-                return Err(format!(
-                    "Password must be at least {} characters",
-                    MIN_ACCOUNT_PASSWORD_LENGTH
-                )
-                .into());
-            }
+            Validation::password_length_probe(&new_password_input, MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
             let confirm_password = UserPrompt::text("Confirm new password: ")?;
             if new_password_input != confirm_password {

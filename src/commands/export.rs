@@ -1,6 +1,7 @@
 use crate::{
     core::{time::Time, types::PasswordEntry},
-    modules::gateway::Gateway, utils::security::Security,
+    modules::gateway::Gateway,
+    utils::security::Security,
 };
 use std::{fs::File, io::BufWriter, path::PathBuf};
 

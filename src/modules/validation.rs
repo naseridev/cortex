@@ -4,9 +4,14 @@ use std::process;
 pub struct Validation;
 
 impl Validation {
-    pub fn storage_existence_probe() -> Result<(), Box<dyn std::error::Error>> {
-        if !Storage::get_db_path().exists() {
-            eprintln!("Database not initialized. Use 'init' command.");
+    pub fn storage_probe(
+        should_exist: bool,
+        error_message: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let exists = Storage::database_exists();
+
+        if exists != should_exist {
+            eprintln!("{}", error_message);
             process::exit(1);
         }
 

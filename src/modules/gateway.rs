@@ -8,7 +8,7 @@ pub struct Gateway;
 
 impl Gateway {
     pub fn login() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
-        Validation::storage_existence_probe()?;
+        Validation::storage_probe(true, "Database not initialized. Use 'init' command.")?;
 
         let mut failure = 0;
         loop {

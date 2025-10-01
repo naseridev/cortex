@@ -3,7 +3,7 @@ use crate::{
         crypto::{Crypto, get_test_data},
         storage::Storage,
     },
-    modules::password::Password,
+    modules::{password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
 use std::process;
@@ -12,10 +12,10 @@ pub struct Init;
 
 impl Init {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
-        if Storage::get_db_path().exists() {
-            eprintln!("Database exists. Use 'reset' command.");
-            process::exit(1);
-        }
+        Validation::storage_probe(
+            false,
+            "Database already exists. Use a different path or remove existing database.",
+        )?;
 
         let master_password = UserPrompt::password("Master password: ")?;
 

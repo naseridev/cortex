@@ -1,9 +1,8 @@
 use crate::{
     core::types::SecureString,
-    modules::{gateway::Gateway, password::Password},
+    modules::{gateway::Gateway, password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
-use std::process;
 
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 
@@ -13,13 +12,12 @@ impl Create {
     pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
-        if storage.db.get(&name)?.is_some() {
-            eprintln!(
-                "Error: Account '{}' already exists. Use 'edit' to update or choose a different name.",
-                name
-            );
-            process::exit(1);
-        }
+        Validation::account_exists_probe(
+            &storage,
+            &name,
+            false,
+            "Account '{}' already exists. Use 'edit' to update or choose a different name.",
+        )?;
 
         let password = UserPrompt::text("Password to store: ")?;
 

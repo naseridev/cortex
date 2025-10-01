@@ -17,4 +17,20 @@ impl Validation {
 
         Ok(())
     }
+
+    pub fn account_exists_probe(
+        storage: &Storage,
+        name: &str,
+        should_exist: bool,
+        error_message: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let exists = storage.db.get(name)?.is_some();
+
+        if exists != should_exist {
+            eprintln!("{}", error_message);
+            process::exit(1);
+        }
+
+        Ok(())
+    }
 }

@@ -28,10 +28,11 @@ impl Create {
         Password::match_check(password.as_str(), confirm_password.as_str())?;
 
         let description_input = UserPrompt::text("Description (optional): ")?;
+
+        Password::in_desc_check(password.as_str(), &description_input)?;
+
         let description = if description_input.is_empty() {
             None
-        } else if Password::in_desc_found(password.as_str(), &description_input) {
-            return Err("Description cannot contain the password or parts of it.".into());
         } else {
             Some(description_input.as_str())
         };

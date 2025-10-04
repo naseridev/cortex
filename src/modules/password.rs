@@ -148,7 +148,7 @@ impl Password {
         Ok(())
     }
 
-    pub fn in_desc_found(password: &str, description: &str) -> bool {
+    fn in_desc_found(password: &str, description: &str) -> bool {
         if password.len() < 3 {
             return false;
         }
@@ -186,5 +186,16 @@ impl Password {
         }
 
         false
+    }
+
+    pub fn in_desc_check(
+        password: &str,
+        description: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if Self::in_desc_found(password, description) {
+            return Err("Description cannot contain the password or parts of it.".into());
+        }
+
+        Ok(())
     }
 }

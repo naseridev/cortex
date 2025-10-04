@@ -45,9 +45,7 @@ impl Edit {
                 None => None,
             }
         } else {
-            if Password::in_desc_found(&new_password, &description_input) {
-                return Err("Description cannot contain the password or parts of it.".into());
-            }
+            Password::in_desc_check(&new_password, &description_input)?;
 
             Some(description_input.as_str())
         };

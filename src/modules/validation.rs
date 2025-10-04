@@ -33,15 +33,4 @@ impl Validation {
 
         Ok(())
     }
-
-    pub fn password_length_probe(
-        password: &str,
-        min_length: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if password.len() < min_length {
-            return Err(format!("Password must be at least {} characters", min_length).into());
-        }
-
-        Ok(())
-    }
 }

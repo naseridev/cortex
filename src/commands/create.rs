@@ -21,13 +21,11 @@ impl Create {
 
         let password = UserPrompt::text("Password to store: ")?;
 
-        Validation::password_length_probe(&password, MIN_ACCOUNT_PASSWORD_LENGTH)?;
+        Password::length_check(&password, MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
         let confirm_password = UserPrompt::text("Confirm password: ")?;
 
-        if password.as_str() != confirm_password.as_str() {
-            return Err("Password mismatch".into());
-        }
+        Password::match_check(password.as_str(), confirm_password.as_str())?;
 
         let description_input = UserPrompt::text("Description (optional): ")?;
         let description = if description_input.is_empty() {

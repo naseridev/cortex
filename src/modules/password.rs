@@ -126,6 +126,28 @@ impl Password {
         Ok(())
     }
 
+    pub fn match_check(
+        left_password: &str,
+        right_password: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if left_password != right_password {
+            return Err("Password mismatch".into());
+        }
+
+        Ok(())
+    }
+
+    pub fn length_check(
+        password: &str,
+        min_length: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if password.len() < min_length {
+            return Err(format!("Password must be at least {} characters", min_length).into());
+        }
+
+        Ok(())
+    }
+
     pub fn in_desc_found(password: &str, description: &str) -> bool {
         if password.len() < 3 {
             return false;

@@ -28,9 +28,7 @@ impl Reset {
 
         let confirm_password = UserPrompt::password("Confirm new password: ")?;
 
-        if new_password.as_str() != confirm_password.as_str() {
-            return Err("Password mismatch".into());
-        }
+        Password::match_check(new_password.as_str(), confirm_password.as_str())?;
 
         let entries = storage.get_all_entries()?;
         let mut decrypted_entries = Vec::new();

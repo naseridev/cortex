@@ -51,7 +51,7 @@ impl Export {
         if processed - failed > 0 {
             println!("Export completed to {}", output_path.display());
         } else {
-            let _ = std::fs::remove_file(&output_path);
+            std::fs::remove_file(&output_path)?;
         }
 
         Ok(())

@@ -29,7 +29,7 @@ impl Init {
         Password::match_check(master_password.as_str(), confirm_password.as_str())?;
 
         let entry = Crypto::new(&master_password).create_entry(get_test_data(), None)?;
-        let _ = Storage::new()?.init_db(&entry);
+        Storage::new()?.init_db(&entry)?;
 
         println!("Initialized.");
 

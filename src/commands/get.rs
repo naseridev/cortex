@@ -1,5 +1,4 @@
 use crate::modules::{clipboard::Clipboard, gateway::Gateway};
-use std::process;
 
 pub struct Get;
 
@@ -18,14 +17,10 @@ impl Get {
                     Clipboard::copy(password.as_str())?;
 
                     if seconds > 540 || seconds < 3 {
-                        eprintln!(
-                            "Error: The time to be distracted is only allowed to be between 3 and 540 seconds"
-                        );
-                        process::exit(1);
+                        return Err("The time to be distracted is only allowed to be between 3 and 540 seconds".into());
                     }
 
-                    println!();
-                    println!("Password copied to clipboard for {} seconds...", seconds);
+                    println!("\nPassword copied to clipboard for {} seconds...", seconds);
 
                     if let Some(desc) = description {
                         println!("Description: {}", desc);
@@ -34,8 +29,7 @@ impl Get {
                     if Clipboard::clear(seconds, password.as_str()) {
                         println!("Done.");
                     } else {
-                        eprintln!("Error: The operation was not performed correctly");
-                        process::exit(1);
+                        return Err("The operation was not performed correctly".into());
                     }
                 } else {
                     println!();

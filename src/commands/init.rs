@@ -6,7 +6,6 @@ use crate::{
     modules::{password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
-use std::process;
 
 pub struct Init;
 
@@ -20,8 +19,7 @@ impl Init {
         let master_password = UserPrompt::password("Master password: ")?;
 
         if let Err(msg) = Password::security_check(master_password.as_str()) {
-            eprintln!("Error: {}", msg);
-            process::exit(1);
+            return Err(format!("{}", msg).into());
         }
 
         let confirm_password = UserPrompt::password("Confirm password: ")?;

@@ -30,11 +30,9 @@ impl Edit {
             }
         } else {
             Password::length_check(&new_password_input, MIN_ACCOUNT_PASSWORD_LENGTH)?;
-
             let confirm_password = UserPrompt::text("Confirm new password: ")?;
 
             Password::match_check(new_password_input.as_str(), confirm_password.as_str())?;
-
             new_password_input
         };
 

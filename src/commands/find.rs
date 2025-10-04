@@ -49,8 +49,7 @@ impl Find {
             return Ok(());
         }
 
-        println!();
-        println!("Found {} match(es) for: {}", results.len(), pattern);
+        println!("\nFound {} match(es) for: {}", results.len(), pattern);
 
         if results.len() > 20 {
             println!("(Showing first 20 results)");

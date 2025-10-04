@@ -20,15 +20,12 @@ impl Create {
         )?;
 
         let password = UserPrompt::text("Password to store: ")?;
-
         Password::length_check(&password, MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
         let confirm_password = UserPrompt::text("Confirm password: ")?;
-
         Password::match_check(password.as_str(), confirm_password.as_str())?;
 
         let description_input = UserPrompt::text("Description (optional): ")?;
-
         Password::in_desc_check(password.as_str(), &description_input)?;
 
         let description = if description_input.is_empty() {

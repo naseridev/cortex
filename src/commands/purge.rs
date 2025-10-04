@@ -7,12 +7,7 @@ impl Purge {
         let storage = Gateway::login_storage_only()?;
 
         let warning_message = "This will permanently delete all stored passwords!";
-        let purge_confirmation = Security::confirmation(warning_message)?;
-
-        if !purge_confirmation {
-            println!("Wrong answer. Destruction cancelled.");
-            return Ok(());
-        }
+        Security::confirmation(warning_message)?;
 
         storage.purge_database()?;
         println!("Database purged.");

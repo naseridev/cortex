@@ -12,12 +12,7 @@ impl Export {
         let (storage, crypto) = Gateway::login()?;
 
         let warning_message = "This will export all passwords in plain text format.";
-        let export_confirmation = Security::confirmation(warning_message)?;
-
-        if !export_confirmation {
-            println!("Wrong answer. Export cancelled.");
-            return Ok(());
-        }
+        Security::confirmation(warning_message)?;
 
         let filename = format!("cortex_export_{:x}.dat", Time::current_timestamp());
         let output_path = PathBuf::from(&filename);

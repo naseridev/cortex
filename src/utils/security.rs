@@ -1,3 +1,5 @@
+use std::process;
+
 use rand::{RngCore, rngs::OsRng};
 
 use crate::ui::prompt::UserPrompt;
@@ -41,7 +43,7 @@ impl Security {
         }
     }
 
-    pub fn confirmation(warning_message: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn confirmation(warning_message: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!();
         println!("WARNING: {}", warning_message);
         println!();
@@ -52,6 +54,11 @@ impl Security {
         let user_answer = UserPrompt::text("Answer: ")?;
         let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
 
-        Ok(user_num == answer)
+        if user_num != answer {
+            println!("Wrong answer. Destruction cancelled.");
+            process::exit(1);
+        }
+
+        Ok(())
     }
 }

@@ -23,7 +23,6 @@ impl Init {
         }
 
         let confirm_password = UserPrompt::password("Confirm password: ")?;
-
         Password::match_check(master_password.as_str(), confirm_password.as_str())?;
 
         let entry = Crypto::new(&master_password).create_entry(get_test_data(), None)?;

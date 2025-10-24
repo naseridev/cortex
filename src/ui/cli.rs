@@ -28,7 +28,6 @@ pub enum Commands {
     Get {
         #[arg(help = "Name of the password entry to retrieve")]
         name: String,
-
         #[arg(
             short = 'c',
             long = "clip",
@@ -57,16 +56,33 @@ pub enum Commands {
     Find {
         #[arg(help = "Search pattern (supports regex)")]
         pattern: String,
-
         #[arg(short, long, help = "Case insensitive search")]
         ignore_case: bool,
-
         #[arg(short, long, help = "Search only in names (not descriptions)")]
         names_only: bool,
     },
 
-    #[command(about = "Export all passwords to plain text file")]
-    Export,
+    #[command(about = "Export all passwords to JSON file")]
+    Export {
+        #[arg(
+            short = 't',
+            long = "template",
+            help = "Export a sample template file instead of actual passwords"
+        )]
+        template: bool,
+    },
+
+    #[command(about = "Import passwords from JSON file")]
+    Import {
+        #[arg(help = "Path to JSON file to import")]
+        file: String,
+        #[arg(
+            short = 'o',
+            long = "overwrite",
+            help = "Overwrite existing entries with same name"
+        )]
+        overwrite: bool,
+    },
 
     #[command(about = "Reset the master password")]
     Reset,
@@ -78,7 +94,6 @@ pub enum Commands {
     Pass {
         #[arg(short = 'e', long, help = "Password length", default_value = "16")]
         length: usize,
-
         #[arg(
             short = 'c',
             long,
@@ -86,16 +101,12 @@ pub enum Commands {
             default_value = "1"
         )]
         count: usize,
-
         #[arg(short = 'u', long, help = "Include uppercase letters")]
         uppercase: bool,
-
         #[arg(short = 'l', long, help = "Include lowercase letters")]
         lowercase: bool,
-
         #[arg(short = 'd', long, help = "Include digits")]
         digits: bool,
-
         #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
     },

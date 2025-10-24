@@ -6,6 +6,7 @@ use cortex::{
     commands::export::Export,
     commands::find::Find,
     commands::get::Get,
+    commands::import::Import,
     commands::init::Init,
     commands::list::List,
     commands::pass::Pass,
@@ -29,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ignore_case,
             names_only,
         } => Find::new(pattern, ignore_case, names_only),
-        Commands::Export => Export::new(),
+        Commands::Export { template } => Export::new(template),
+        Commands::Import { file, overwrite } => Import::new(file, overwrite),
         Commands::Reset => Reset::new(),
         Commands::Purge => Purge::new(),
         Commands::Pass {

@@ -1,3 +1,4 @@
+pub mod config;
 pub mod create;
 pub mod delete;
 pub mod edit;
@@ -7,6 +8,7 @@ pub mod get;
 pub mod import;
 pub mod init;
 pub mod list;
+pub mod lock;
 pub mod pass;
 pub mod purge;
 pub mod reset;

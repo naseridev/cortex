@@ -1,5 +1,6 @@
 use clap::Parser;
 use cortex::{
+    commands::config::ConfigCmd,
     commands::create::Create,
     commands::delete::Delete,
     commands::edit::Edit,
@@ -9,10 +10,11 @@ use cortex::{
     commands::import::Import,
     commands::init::Init,
     commands::list::List,
+    commands::lock::Lock,
     commands::pass::Pass,
     commands::purge::Purge,
     commands::reset::Reset,
-    ui::cli::{Cli, Commands},
+    ui::cli::{Cli, Commands, ConfigAction},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,6 +36,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Import { file, overwrite } => Import::new(file, overwrite),
         Commands::Reset => Reset::new(),
         Commands::Purge => Purge::new(),
+        Commands::Lock => Lock::new(),
+        Commands::Config { action } => match action {
+            Some(ConfigAction::Show) => ConfigCmd::show(),
+            Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
+            None => ConfigCmd::show(),
+        },
         Commands::Pass {
             length,
             count,

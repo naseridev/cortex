@@ -90,6 +90,15 @@ pub enum Commands {
     #[command(about = "Permanently purge the entire password database")]
     Purge,
 
+    #[command(about = "Clear authentication session and require re-login")]
+    Lock,
+
+    #[command(about = "Manage configuration settings")]
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+
     #[command(about = "Generate strong passwords")]
     Pass {
         #[arg(short = 'e', long, help = "Password length", default_value = "16")]
@@ -109,5 +118,17 @@ pub enum Commands {
         digits: bool,
         #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    #[command(about = "Show current configuration")]
+    Show,
+
+    #[command(about = "Set session timeout in seconds")]
+    SetTimeout {
+        #[arg(help = "Timeout in seconds (60-86400)")]
+        seconds: u64,
     },
 }

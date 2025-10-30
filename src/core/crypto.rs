@@ -128,10 +128,6 @@ impl Crypto {
         })
     }
 
-    pub fn create_test_entry() -> Result<PasswordEntry, Box<dyn std::error::Error>> {
-        Err("Use create_entry with TEST_DATA instead".into())
-    }
-
     fn derive_key(password: &[u8]) -> Key {
         let hardware_id = Self::get_hardware_id();
         let mut hasher = Hasher::new();
@@ -140,14 +136,15 @@ impl Crypto {
         hasher.update(&hardware_id);
 
         let hash = hasher.finalize();
-        let key_bytes: [u8; 32] = hash.as_bytes()[..32].try_into().unwrap();
+        let key_bytes: [u8; 32] = hash.as_bytes()[..32]
+            .try_into()
+            .expect("Hash size mismatch");
         Key::from(key_bytes)
     }
 
     fn get_hardware_id() -> Vec<u8> {
         let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        let sys = System::new_all();
 
         if let Some(cpu) = sys.cpus().first() {
             hasher.update(cpu.brand().as_bytes());

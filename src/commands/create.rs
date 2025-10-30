@@ -26,6 +26,11 @@ impl Create {
         Password::match_check(password.as_str(), confirm_password.as_str())?;
 
         let description_input = UserPrompt::text("Description (optional): ")?;
+
+        if description_input.len() > 500 {
+            return Err("Description too long (max 500 chars)".into());
+        }
+
         Password::in_desc_check(password.as_str(), &description_input)?;
 
         let description = if description_input.is_empty() {

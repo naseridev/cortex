@@ -25,6 +25,10 @@ pub struct Import;
 
 impl Import {
     pub fn new(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
+        if file_path.is_empty() {
+            return Err("File path cannot be empty".into());
+        }
+
         let path = Path::new(&file_path);
 
         let file = File::open(path).map_err(|_| format!("File not found: {}", file_path))?;

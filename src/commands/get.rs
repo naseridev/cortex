@@ -1,4 +1,7 @@
-use crate::modules::{clipboard::Clipboard, gateway::Gateway};
+use crate::{
+    core::types::SecureString,
+    modules::{clipboard::Clipboard, gateway::Gateway},
+};
 
 pub struct Get;
 
@@ -9,7 +12,7 @@ impl Get {
         match storage.get_password(&name)? {
             Some(entry) => {
                 let decrypted = crypto.decrypt_entry(&entry)?;
-                let password = String::from_utf8(decrypted)?;
+                let password = SecureString::new(String::from_utf8(decrypted)?);
                 let description = crypto.decrypt_description(&entry)?;
 
                 if let Some(duration) = clip {

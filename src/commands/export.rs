@@ -4,7 +4,7 @@ use crate::{
     utils::security::Security,
 };
 use serde::Serialize;
-use std::{fs::File, io::BufWriter, path::PathBuf};
+use std::{fs::File, io::BufWriter, io::Write, path::PathBuf};
 
 #[derive(Serialize)]
 struct ExportData {
@@ -35,7 +35,7 @@ impl Export {
         let filename = format!("cortex_export_{:x}.json", Time::current_timestamp());
         let output_path = PathBuf::from(&filename);
         let file = File::create(&output_path)?;
-        let writer = BufWriter::with_capacity(64 * 1024, file);
+        let mut writer = BufWriter::with_capacity(64 * 1024, file);
 
         let mut entries = Vec::new();
         let mut processed = 0;
@@ -79,7 +79,9 @@ impl Export {
             entries,
         };
 
-        serde_json::to_writer_pretty(writer, &export_data)?;
+        serde_json::to_writer_pretty(&mut writer, &export_data)?;
+
+        writer.flush()?;
 
         if failed > 0 {
             eprintln!(

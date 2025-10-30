@@ -86,7 +86,10 @@ impl Storage {
 
     pub fn delete_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
         if name.starts_with("__") {
-            return Ok(false);
+            return Err("Cannot delete system entries".into());
+        }
+        if name.is_empty() {
+            return Err("Empty name not allowed".into());
         }
 
         match self.db.remove(name)? {

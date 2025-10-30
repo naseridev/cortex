@@ -10,6 +10,10 @@ pub struct Create;
 
 impl Create {
     pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if name.starts_with("__") || name.is_empty() {
+            return Err("Invalid account name".into());
+        }
+
         let (storage, crypto) = Gateway::login()?;
 
         Validation::account_exists_probe(

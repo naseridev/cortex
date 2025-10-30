@@ -26,11 +26,8 @@ pub struct Import;
 impl Import {
     pub fn new(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
         let path = Path::new(&file_path);
-        if !path.exists() {
-            return Err(format!("File not found: {}", file_path).into());
-        }
 
-        let file = File::open(path)?;
+        let file = File::open(path).map_err(|_| format!("File not found: {}", file_path))?;
         let reader = BufReader::new(file);
         let import_data: ImportData =
             serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {}", e))?;
@@ -71,6 +68,15 @@ impl Import {
             }
 
             if let Some(ref desc) = entry.description {
+                if desc.len() > 500 {
+                    eprintln!(
+                        "Skipping '{}': Description too long (max 500 chars)",
+                        entry.name
+                    );
+                    failed += 1;
+                    continue;
+                }
+
                 if let Err(e) = Password::in_desc_check(&entry.password, desc) {
                     eprintln!("Skipping '{}': {}", entry.name, e);
                     failed += 1;

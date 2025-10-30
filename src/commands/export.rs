@@ -41,11 +41,8 @@ impl Export {
         let mut processed = 0;
         let mut failed = 0;
 
-        for item in storage.db.iter() {
-            let (key, value) = match item {
-                Ok((k, v)) => (k, v),
-                Err(_) => continue,
-            };
+        for item in storage.db.iter().filter_map(Result::ok) {
+            let (key, value) = item;
 
             let key_str = String::from_utf8_lossy(&key);
             if key_str.starts_with("__") {
@@ -53,6 +50,7 @@ impl Export {
             }
 
             processed += 1;
+            let name = key_str.to_string();
 
             match bincode::deserialize::<PasswordEntry>(&value) {
                 Ok(entry) => match crypto.decrypt_entry(&entry) {
@@ -60,7 +58,7 @@ impl Export {
                         Ok(password) => {
                             let description = crypto.decrypt_description(&entry).ok().flatten();
                             entries.push(ExportEntry {
-                                name: key_str.to_string(),
+                                name,
                                 password,
                                 description,
                             });

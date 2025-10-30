@@ -84,6 +84,11 @@ impl Session {
             }
         };
 
+        if session_data.encrypted_password.is_empty() {
+            Self::clear_session()?;
+            return Ok(None);
+        }
+
         let current_time = Time::current_timestamp();
         let config = Config::load()?;
 
@@ -110,9 +115,11 @@ impl Session {
             Ok(data) => data,
             Err(_) => {
                 session_data.attempts += 1;
-                let serialized = bincode::serialize(&session_data)?;
-                let mut file = File::create(&session_path)?;
-                file.write_all(&serialized)?;
+                if let Ok(serialized) = bincode::serialize(&session_data) {
+                    if let Ok(mut file) = File::create(&session_path) {
+                        let _ = file.write_all(&serialized);
+                    }
+                }
                 return Ok(None);
             }
         };

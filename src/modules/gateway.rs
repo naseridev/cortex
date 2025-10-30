@@ -35,7 +35,7 @@ impl Gateway {
             if is_correct {
                 Session::save_session(&master_password).ok();
                 return Ok((storage, crypto));
-            } else if failure > 1 {
+            } else if failure >= 2 {
                 Session::clear_session().ok();
                 return Err("Authentication failed".into());
             } else {

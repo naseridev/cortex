@@ -37,6 +37,11 @@ impl Edit {
         };
 
         let description_input = UserPrompt::text("New description (Enter to keep current): ")?;
+
+        if description_input.len() > 500 {
+            return Err("Description too long (max 500 chars)".into());
+        }
+
         let description = if description_input.is_empty() {
             match &current_entry {
                 Some((_, desc)) => desc.as_deref(),

@@ -10,6 +10,10 @@ pub struct Edit;
 
 impl Edit {
     pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+        if name.starts_with("__") {
+            return Err("Cannot edit system entries".into());
+        }
+
         let (storage, crypto) = Gateway::login()?;
 
         let current_entry = match storage.get_password(&name)? {

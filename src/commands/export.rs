@@ -108,19 +108,21 @@ impl Export {
 
         let sample_entries = vec![
             ExportEntry {
-                name: "github".to_string(),
-                password: "MySecurePassword123!".to_string(),
-                description: Some("GitHub account credentials".to_string()),
+                name: "heisenberg".to_string(),
+                password: "1AmTh3D4ng3r!".to_string(),
+                description: Some("Say my name - I am the one who knocks".to_string()),
             },
             ExportEntry {
-                name: "gmail".to_string(),
-                password: "AnotherPassword456@".to_string(),
-                description: Some("Personal email account".to_string()),
+                name: "los-pollos".to_string(),
+                password: "Gustu5Fr!ng2024".to_string(),
+                description: Some("A man provides for his family".to_string()),
             },
             ExportEntry {
-                name: "work-vpn".to_string(),
-                password: "VpnPass789#".to_string(),
-                description: None,
+                name: "saul-goodman".to_string(),
+                password: "B3tt3rC4llS4ul!".to_string(),
+                description: Some(
+                    "Did you know you have rights? Constitution says you do".to_string(),
+                ),
             },
         ];
 

@@ -39,6 +39,10 @@ impl Storage {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<bool, Box<dyn std::error::Error>> {
+        if name.starts_with("__") {
+            return Err("Reserved name prefix".into());
+        }
+
         if self.db.get(name)?.is_some() {
             return Ok(false);
         }
@@ -99,7 +103,11 @@ impl Storage {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        if name.starts_with("__") || self.db.get(name)?.is_none() {
+        if name.starts_with("__") {
+            return Ok(false);
+        }
+
+        if self.db.get(name)?.is_none() {
             return Ok(false);
         }
 
@@ -113,7 +121,7 @@ impl Storage {
         &self,
         pattern: &str,
     ) -> Result<Vec<(String, PasswordEntry)>, Box<dyn std::error::Error>> {
-        if pattern.trim().is_empty() {
+        if pattern.is_empty() || pattern.trim().is_empty() {
             return Err("Search pattern cannot be empty".into());
         }
 

@@ -144,10 +144,14 @@ impl Crypto {
 
     fn get_hardware_id() -> Vec<u8> {
         let mut hasher = Hasher::new();
-        let sys = System::new_all();
+        let mut sys = System::new_all();
+        sys.refresh_cpu();
 
         if let Some(cpu) = sys.cpus().first() {
-            hasher.update(cpu.brand().as_bytes());
+            let brand = cpu.brand();
+            if !brand.is_empty() {
+                hasher.update(brand.as_bytes());
+            }
         }
 
         hasher.update(HARDWARE_SALT);

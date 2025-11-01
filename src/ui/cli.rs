@@ -144,6 +144,12 @@ pub enum ConfigAction {
         #[arg(help = "Timeout in seconds (60-86400)")]
         seconds: u64,
     },
+
+    #[command(about = "Enable or disable hardware binding")]
+    SetHardwareBinding {
+        #[arg(value_name = "ENABLED", help = "Enable (true) or disable (false)")]
+        enabled: String,
+    },
 }
 
 #[derive(Subcommand)]

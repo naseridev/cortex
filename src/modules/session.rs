@@ -172,12 +172,18 @@ impl Session {
     }
 
     fn derive_session_key(salt: &[u8; 32]) -> Result<Key, Box<dyn std::error::Error>> {
-        let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
+        use crate::core::config::Config;
 
-        if let Some(cpu) = sys.cpus().first() {
-            hasher.update(cpu.brand().as_bytes());
+        let config = Config::load().unwrap_or_default();
+        let mut hasher = Hasher::new();
+
+        if config.hardware_binding_enabled {
+            let mut sys = System::new_all();
+            sys.refresh_cpu();
+
+            if let Some(cpu) = sys.cpus().first() {
+                hasher.update(cpu.brand().as_bytes());
+            }
         }
 
         hasher.update(b"cortex_session_key_v3");
@@ -199,12 +205,18 @@ impl Session {
     }
 
     fn compute_machine_hash() -> [u8; 32] {
-        let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
+        use crate::core::config::Config;
 
-        if let Some(cpu) = sys.cpus().first() {
-            hasher.update(cpu.brand().as_bytes());
+        let config = Config::load().unwrap_or_default();
+        let mut hasher = Hasher::new();
+
+        if config.hardware_binding_enabled {
+            let mut sys = System::new_all();
+            sys.refresh_cpu();
+
+            if let Some(cpu) = sys.cpus().first() {
+                hasher.update(cpu.brand().as_bytes());
+            }
         }
 
         hasher.update(b"cortex_machine_binding_v1");

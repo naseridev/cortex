@@ -7,16 +7,24 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default = "default_session_timeout")]
     pub session_timeout_seconds: u64,
+
+    #[serde(default = "default_hardware_binding")]
+    pub hardware_binding_enabled: bool,
 }
 
 fn default_session_timeout() -> u64 {
     480
 }
 
+fn default_hardware_binding() -> bool {
+    false
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             session_timeout_seconds: 480,
+            hardware_binding_enabled: false,
         }
     }
 }

@@ -186,7 +186,15 @@ impl Crypto {
     }
 
     fn derive_key(password: &[u8]) -> Key {
-        let hardware_id = Self::get_hardware_id();
+        use crate::core::config::Config;
+
+        let config = Config::load().unwrap_or_default();
+        let hardware_id = if config.hardware_binding_enabled {
+            Self::get_hardware_id()
+        } else {
+            HARDWARE_SALT.to_vec()
+        };
+
         let mut hasher = Hasher::new();
 
         hasher.update(password);

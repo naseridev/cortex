@@ -11,6 +11,14 @@ impl ConfigCmd {
             config.session_timeout_seconds,
             config.session_timeout_seconds / 60
         );
+        println!(
+            "  Hardware binding: {}",
+            if config.hardware_binding_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         Ok(())
     }
 
@@ -32,6 +40,25 @@ impl ConfigCmd {
             seconds,
             seconds / 60
         );
+        Ok(())
+    }
+
+    pub fn set_hardware_binding(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let mut config = Config::load()?;
+        config.hardware_binding_enabled = enabled;
+        config.save()?;
+
+        println!(
+            "Hardware binding {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+
+        if enabled {
+            println!("\nNote: Database will be bound to this machine's CPU.");
+            println!("You won't be able to access it from another machine.");
+            println!("Use 'cortex export' to create portable backups.");
+        }
+
         Ok(())
     }
 }

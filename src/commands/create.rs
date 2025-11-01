@@ -20,7 +20,7 @@ impl Create {
             &storage,
             &name,
             false,
-            "Account '{}' already exists. Use 'edit' to update or choose a different name.",
+            "Account already exists. Use 'edit' to update or choose a different name.",
         )?;
 
         let password = UserPrompt::text("Password to store: ")?;

@@ -41,9 +41,7 @@ impl Clipboard {
         if let Ok(mut ctx) = ClipboardContext::new() {
             if let Ok(current_clipboard) = ctx.get_contents() {
                 if current_clipboard == password_copy {
-                    if ctx.set_contents(" ".to_owned()).is_ok() {
-                        return true;
-                    }
+                    return ctx.set_contents(" ".to_owned()).is_ok();
                 }
             }
         }

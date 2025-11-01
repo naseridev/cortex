@@ -10,6 +10,10 @@ impl Reset {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
+        println!("Creating backup before reset...");
+        storage.create_backup()?;
+        println!("Backup created successfully.\n");
+
         let salt = storage.get_salt()?.ok_or("Database salt not found")?;
 
         let new_password = loop {
@@ -71,7 +75,7 @@ impl Reset {
 
         storage.flush()?;
 
-        println!("Master password reset.");
+        println!("Master password reset successfully.");
 
         Ok(())
     }

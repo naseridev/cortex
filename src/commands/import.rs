@@ -50,53 +50,61 @@ impl Import {
 
         let (storage, crypto) = Gateway::login()?;
 
-        let mut imported = 0;
-        let mut skipped = 0;
-        let mut failed = 0;
+        let mut validated_entries = Vec::new();
+        let mut validation_errors = Vec::new();
 
         for entry in import_data.entries {
             if entry.name.is_empty() {
-                eprintln!("Skipping entry with empty name");
-                failed += 1;
+                validation_errors.push(format!("Entry with empty name"));
                 continue;
             }
 
             if entry.name.starts_with("__") {
-                eprintln!("Skipping reserved name: {}", entry.name);
-                failed += 1;
+                validation_errors.push(format!("Reserved name: {}", entry.name));
                 continue;
             }
 
             if let Err(e) = Password::length_check(&entry.password, MIN_ACCOUNT_PASSWORD_LENGTH) {
-                eprintln!("Skipping '{}': {}", entry.name, e);
-                failed += 1;
+                validation_errors.push(format!("{}: {}", entry.name, e));
                 continue;
             }
 
             if let Some(ref desc) = entry.description {
                 if desc.len() > 500 {
-                    eprintln!(
-                        "Skipping '{}': Description too long (max 500 chars)",
-                        entry.name
-                    );
-                    failed += 1;
+                    validation_errors.push(format!("{}: Description too long", entry.name));
                     continue;
                 }
 
                 if let Err(e) = Password::in_desc_check(&entry.password, desc) {
-                    eprintln!("Skipping '{}': {}", entry.name, e);
-                    failed += 1;
+                    validation_errors.push(format!("{}: {}", entry.name, e));
                     continue;
                 }
             }
 
             let normalized_tags = TagValidator::normalize(&entry.tags);
             if let Err(e) = TagValidator::validate(&normalized_tags) {
-                eprintln!("Skipping '{}': {}", entry.name, e);
-                failed += 1;
+                validation_errors.push(format!("{}: {}", entry.name, e));
                 continue;
             }
 
+            validated_entries.push((entry, normalized_tags));
+        }
+
+        if !validation_errors.is_empty() {
+            eprintln!("\nValidation errors:");
+            for error in &validation_errors {
+                eprintln!("  - {}", error);
+            }
+        }
+
+        let mut imported_names = Vec::new();
+        let mut original_entries = Vec::new();
+
+        let mut imported = 0;
+        let mut skipped = 0;
+        let mut failed = 0;
+
+        for (entry, normalized_tags) in validated_entries {
             let exists = storage.entry_exists(&entry.name)?;
 
             if exists && !overwrite {
@@ -106,6 +114,12 @@ impl Import {
                 );
                 skipped += 1;
                 continue;
+            }
+
+            if exists {
+                if let Ok(Some(original)) = storage.get_password(&entry.name) {
+                    original_entries.push((entry.name.clone(), original));
+                }
             }
 
             let tag_list = if normalized_tags.is_empty() {
@@ -132,6 +146,7 @@ impl Import {
                                 println!("Updated: {}", entry.name);
                             } else {
                                 println!("Imported: {}", entry.name);
+                                imported_names.push(entry.name.clone());
                             }
                             imported += 1;
                         }
@@ -141,7 +156,8 @@ impl Import {
                         }
                         Err(e) => {
                             eprintln!("Error importing '{}': {}", entry.name, e);
-                            failed += 1;
+                            Self::rollback_import(&storage, &imported_names, &original_entries)?;
+                            return Err(format!("Import failed, changes rolled back: {}", e).into());
                         }
                     }
                 }
@@ -160,6 +176,27 @@ impl Import {
         if failed > 0 {
             println!("  Failed: {}", failed);
         }
+
+        Ok(())
+    }
+
+    fn rollback_import(
+        storage: &crate::core::storage::Storage,
+        imported_names: &[String],
+        original_entries: &[(String, crate::core::types::PasswordEntry)],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        eprintln!("\nRolling back changes...");
+
+        for name in imported_names {
+            let _ = storage.delete_password(name);
+        }
+
+        for (name, entry) in original_entries {
+            let _ = storage.edit_password(name, entry);
+        }
+
+        storage.flush()?;
+        eprintln!("Rollback completed.");
 
         Ok(())
     }

@@ -81,7 +81,7 @@ impl Session {
         file.read_to_end(&mut contents)?;
         drop(file);
 
-        let mut session_data: SessionData = match bincode::deserialize(&contents) {
+        let session_data: SessionData = match bincode::deserialize(&contents) {
             Ok(data) => data,
             Err(_) => {
                 Self::clear_session()?;
@@ -125,12 +125,7 @@ impl Session {
         let mut decrypted = match cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) {
             Ok(data) => data,
             Err(_) => {
-                session_data.attempts += 1;
-                if let Ok(serialized) = bincode::serialize(&session_data) {
-                    if let Ok(mut file) = File::create(&session_path) {
-                        let _ = file.write_all(&serialized);
-                    }
-                }
+                Self::clear_session()?;
                 return Ok(None);
             }
         };

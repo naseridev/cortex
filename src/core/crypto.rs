@@ -6,7 +6,6 @@ use rand::{RngCore, rngs::OsRng};
 use sysinfo::{CpuExt, System, SystemExt};
 
 const KDF_ITERATIONS: u32 = 600_000;
-const FALLBACK_SALT: &[u8] = b"cortex_fallback_salt";
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
@@ -147,72 +146,8 @@ impl Crypto {
         hasher.finalize().as_bytes().to_vec()
     }
 
-    pub fn encrypt_with_new_key(
-        new_password: &SecureString,
-        salt: &[u8],
-        data: &[u8],
-        description: Option<&str>,
-        tags: Option<&[String]>,
-    ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
-        let new_cipher = ChaCha20Poly1305::new(&Self::derive_key(new_password.as_bytes(), salt));
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let encrypted = new_cipher
-            .encrypt(nonce, data)
-            .map_err(|e| format!("Encryption failed: {:?}", e))?;
-
-        let (encrypted_description, desc_nonce) = if let Some(desc) = description {
-            let mut desc_nonce_bytes = [0u8; 12];
-            OsRng.fill_bytes(&mut desc_nonce_bytes);
-            let desc_nonce = Nonce::from_slice(&desc_nonce_bytes);
-
-            let encrypted_desc = new_cipher
-                .encrypt(desc_nonce, desc.as_bytes())
-                .map_err(|e| format!("Description encryption failed: {:?}", e))?;
-
-            (Some(encrypted_desc), Some(desc_nonce_bytes))
-        } else {
-            (None, None)
-        };
-
-        let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
-            let tags_json = serde_json::to_string(tag_list)
-                .map_err(|e| format!("Tag serialization failed: {}", e))?;
-            let mut tags_nonce_bytes = [0u8; 12];
-            OsRng.fill_bytes(&mut tags_nonce_bytes);
-            let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
-
-            let encrypted_tags = new_cipher
-                .encrypt(tags_nonce, tags_json.as_bytes())
-                .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
-
-            (Some(encrypted_tags), Some(tags_nonce_bytes))
-        } else {
-            (None, None)
-        };
-
-        Ok(PasswordEntry {
-            encrypted_password: encrypted,
-            encrypted_description,
-            encrypted_tags,
-            nonce: nonce_bytes,
-            desc_nonce,
-            tags_nonce,
-            timestamp: Time::current_timestamp(),
-        })
-    }
-
     fn derive_key(password: &[u8], salt: &[u8]) -> Key {
-        use crate::core::config::Config;
-
-        let config = Config::load().unwrap_or_default();
-        let hardware_id = if config.hardware_binding_enabled {
-            Self::get_hardware_id()
-        } else {
-            FALLBACK_SALT.to_vec()
-        };
+        let hardware_id = Self::get_hardware_id();
 
         let mut hasher = Hasher::new();
         hasher.update(password);

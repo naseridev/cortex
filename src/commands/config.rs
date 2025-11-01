@@ -1,4 +1,5 @@
 use crate::core::config::Config;
+use crate::modules::gateway::Gateway;
 
 pub struct ConfigCmd;
 
@@ -10,14 +11,6 @@ impl ConfigCmd {
             "  Session timeout: {} seconds ({} minutes)",
             config.session_timeout_seconds,
             config.session_timeout_seconds / 60
-        );
-        println!(
-            "  Hardware binding: {}",
-            if config.hardware_binding_enabled {
-                "enabled"
-            } else {
-                "disabled"
-            }
         );
         Ok(())
     }
@@ -31,34 +24,16 @@ impl ConfigCmd {
             return Err("Session timeout cannot exceed 86400 seconds (24 hours)".into());
         }
 
-        let mut config = Config::load()?;
+        let storage = Gateway::login_storage_only()?;
+        let mut config = Config::load_from_db(&storage.db)?;
         config.session_timeout_seconds = seconds;
-        config.save()?;
+        config.save_to_db(&storage.db)?;
 
         println!(
             "Session timeout set to {} seconds ({} minutes)",
             seconds,
             seconds / 60
         );
-        Ok(())
-    }
-
-    pub fn set_hardware_binding(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let mut config = Config::load()?;
-        config.hardware_binding_enabled = enabled;
-        config.save()?;
-
-        println!(
-            "Hardware binding {}",
-            if enabled { "enabled" } else { "disabled" }
-        );
-
-        if enabled {
-            println!("\nNote: Database will be bound to this machine's CPU.");
-            println!("You won't be able to access it from another machine.");
-            println!("Use 'cortex export' to create portable backups.");
-        }
-
         Ok(())
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    core::{crypto::Crypto, storage::Storage},
+    core::{config::Config, crypto::Crypto, storage::Storage},
     modules::{session::Session, validation::Validation},
     ui::prompt::UserPrompt,
 };
@@ -11,6 +11,9 @@ impl Gateway {
         Validation::storage_probe(true, "Database not initialized. Use 'init' command.")?;
 
         let storage = Storage::new()?;
+
+        Config::clear_cache();
+        Config::load_from_db(&storage.db)?;
 
         let salt = storage
             .get_salt()?

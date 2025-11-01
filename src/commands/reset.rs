@@ -41,6 +41,8 @@ impl Reset {
             decrypted_entries.push((name.clone(), password, description, tags));
         }
 
+        let new_crypto = Crypto::new(&new_password, &salt);
+
         for (name, password, description, tags) in &decrypted_entries {
             let tag_list = if tags.is_empty() {
                 None
@@ -48,13 +50,8 @@ impl Reset {
                 Some(tags.as_slice())
             };
 
-            let new_entry = Crypto::encrypt_with_new_key(
-                &new_password,
-                &salt,
-                password.as_bytes(),
-                description.as_deref(),
-                tag_list,
-            )?;
+            let new_entry =
+                new_crypto.create_entry(password.as_bytes(), description.as_deref(), tag_list)?;
             storage.update_entry(name, &new_entry)?;
         }
 

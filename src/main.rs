@@ -41,17 +41,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Config { action } => match action {
             Some(ConfigAction::Show) => ConfigCmd::show(),
             Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
-            Some(ConfigAction::SetHardwareBinding { enabled }) => {
-                let enabled_bool = match enabled.to_lowercase().as_str() {
-                    "true" | "1" | "yes" | "on" => true,
-                    "false" | "0" | "no" | "off" => false,
-                    _ => {
-                        eprintln!("Invalid value. Use: true, false, yes, no, on, off, 1, or 0");
-                        std::process::exit(1);
-                    }
-                };
-                ConfigCmd::set_hardware_binding(enabled_bool)
-            }
             None => ConfigCmd::show(),
         },
         Commands::Pass {

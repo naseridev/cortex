@@ -1,78 +1,89 @@
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
-use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+
+const CONFIG_KEY: &str = "__config__";
+
+static CONFIG_CACHE: OnceLock<Arc<Mutex<Option<Config>>>> = OnceLock::new();
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_session_timeout")]
     pub session_timeout_seconds: u64,
-
-    #[serde(default = "default_hardware_binding")]
-    pub hardware_binding_enabled: bool,
 }
 
 fn default_session_timeout() -> u64 {
     480
 }
 
-fn default_hardware_binding() -> bool {
-    false
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
             session_timeout_seconds: 480,
-            hardware_binding_enabled: false,
         }
     }
 }
 
 impl Config {
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let config_path = Self::get_config_path();
+    pub fn load_from_db(db: &sled::Db) -> Result<Self, Box<dyn std::error::Error>> {
+        match db.get(CONFIG_KEY)? {
+            Some(data) => {
+                let config: Config =
+                    bincode::deserialize(&data).unwrap_or_else(|_| Self::default());
 
-        if !config_path.exists() {
-            let default_config = Self::default();
-            default_config.save()?;
-            return Ok(default_config);
+                Self::update_cache(config.clone());
+                Ok(config)
+            }
+            None => {
+                let default_config = Self::default();
+                default_config.save_to_db(db)?;
+                Self::update_cache(default_config.clone());
+                Ok(default_config)
+            }
         }
-
-        let mut file = File::open(&config_path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let config: Config = toml::from_str(&contents).unwrap_or_else(|_| Self::default());
-
-        Ok(config)
     }
 
-    pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let config_path = Self::get_config_path();
-
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let toml_string = toml::to_string_pretty(self)?;
-        let mut file = File::create(&config_path)?;
-        file.write_all(toml_string.as_bytes())?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))?;
-        }
-
+    pub fn save_to_db(&self, db: &sled::Db) -> Result<(), Box<dyn std::error::Error>> {
+        let serialized = bincode::serialize(self)?;
+        db.insert(CONFIG_KEY, serialized)?;
+        db.flush()?;
+        Self::update_cache(self.clone());
         Ok(())
     }
 
-    pub fn get_config_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("cortex");
-        fs::create_dir_all(&path).ok();
-        path.push("config.toml");
-        path
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        if let Some(cached) = Self::get_cached() {
+            return Ok(cached);
+        }
+
+        use crate::core::storage::Storage;
+
+        if !Storage::database_exists() {
+            return Ok(Self::default());
+        }
+
+        let storage = Storage::new()?;
+        Self::load_from_db(&storage.db)
+    }
+
+    fn update_cache(config: Config) {
+        let cache = CONFIG_CACHE.get_or_init(|| Arc::new(Mutex::new(None)));
+        if let Ok(mut cached) = cache.lock() {
+            *cached = Some(config);
+        }
+    }
+
+    fn get_cached() -> Option<Config> {
+        CONFIG_CACHE
+            .get()
+            .and_then(|cache| cache.lock().ok())
+            .and_then(|cached| cached.clone())
+    }
+
+    pub fn clear_cache() {
+        if let Some(cache) = CONFIG_CACHE.get() {
+            if let Ok(mut cached) = cache.lock() {
+                *cached = None;
+            }
+        }
     }
 }

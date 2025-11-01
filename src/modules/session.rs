@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 use zeroize::Zeroize;
 
 const SESSION_FILE: &str = ".cortex_session";

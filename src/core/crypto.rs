@@ -3,7 +3,7 @@ use crate::core::types::{PasswordEntry, SecureString};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce, aead::Aead};
 use rand::{RngCore, rngs::OsRng};
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 
 const KDF_ITERATIONS: u32 = 600_000;
 

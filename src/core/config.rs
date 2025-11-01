@@ -30,13 +30,13 @@ impl Config {
                 let config: Config =
                     bincode::deserialize(&data).unwrap_or_else(|_| Self::default());
 
-                Self::update_cache(config.clone());
+                Self::update_cache(config.clone())?;
                 Ok(config)
             }
             None => {
                 let default_config = Self::default();
                 default_config.save_to_db(db)?;
-                Self::update_cache(default_config.clone());
+                Self::update_cache(default_config.clone())?;
                 Ok(default_config)
             }
         }
@@ -46,7 +46,7 @@ impl Config {
         let serialized = bincode::serialize(self)?;
         db.insert(CONFIG_KEY, serialized)?;
         db.flush()?;
-        Self::update_cache(self.clone());
+        Self::update_cache(self.clone())?;
         Ok(())
     }
 
@@ -65,11 +65,11 @@ impl Config {
         Self::load_from_db(&storage.db)
     }
 
-    fn update_cache(config: Config) {
+    fn update_cache(config: Config) -> Result<(), Box<dyn std::error::Error>> {
         let cache = CONFIG_CACHE.get_or_init(|| Arc::new(Mutex::new(None)));
-        if let Ok(mut cached) = cache.lock() {
-            *cached = Some(config);
-        }
+        let mut cached = cache.lock().map_err(|_| "Failed to acquire cache lock")?;
+        *cached = Some(config);
+        Ok(())
     }
 
     fn get_cached() -> Option<Config> {

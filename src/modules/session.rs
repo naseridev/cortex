@@ -6,10 +6,12 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use sysinfo::{CpuExt, System, SystemExt};
 use zeroize::Zeroize;
 
 const SESSION_FILE: &str = ".cortex_session";
 const MAX_SESSION_AGE: u64 = 86400;
+const SESSION_KDF_ITERATIONS: u32 = 50_000;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SessionData {
@@ -18,6 +20,7 @@ struct SessionData {
     salt: [u8; 32],
     encrypted_password: Vec<u8>,
     attempts: u32,
+    machine_hash: [u8; 32],
 }
 
 pub struct Session;
@@ -39,6 +42,7 @@ impl Session {
             .map_err(|_| "Session encryption failed")?;
 
         let timestamp = Time::current_timestamp();
+        let machine_hash = Self::compute_machine_hash();
 
         let session_data = SessionData {
             timestamp,
@@ -46,6 +50,7 @@ impl Session {
             salt,
             encrypted_password: encrypted,
             attempts: 0,
+            machine_hash,
         };
 
         let serialized = bincode::serialize(&session_data)?;
@@ -85,6 +90,12 @@ impl Session {
         };
 
         if session_data.encrypted_password.is_empty() {
+            Self::clear_session()?;
+            return Ok(None);
+        }
+
+        let current_machine_hash = Self::compute_machine_hash();
+        if session_data.machine_hash != current_machine_hash {
             Self::clear_session()?;
             return Ok(None);
         }
@@ -161,24 +172,47 @@ impl Session {
     }
 
     fn derive_session_key(salt: &[u8; 32]) -> Result<Key, Box<dyn std::error::Error>> {
-        use sysinfo::{CpuExt, System, SystemExt};
-
         let mut hasher = Hasher::new();
         let mut sys = System::new_all();
-        sys.refresh_all();
+        sys.refresh_cpu();
 
         if let Some(cpu) = sys.cpus().first() {
             hasher.update(cpu.brand().as_bytes());
         }
 
-        hasher.update(b"cortex_session_key_v2");
+        hasher.update(b"cortex_session_key_v3");
         hasher.update(salt);
 
-        let hash = hasher.finalize();
-        let key_bytes: [u8; 32] = hash.as_bytes()[..32]
+        let mut derived = hasher.finalize().as_bytes().to_vec();
+
+        for _ in 0..SESSION_KDF_ITERATIONS {
+            let mut hasher = Hasher::new();
+            hasher.update(&derived);
+            hasher.update(salt);
+            derived = hasher.finalize().as_bytes().to_vec();
+        }
+
+        let key_bytes: [u8; 32] = derived[..32]
             .try_into()
             .map_err(|_| "Key derivation failed")?;
         Ok(Key::from(key_bytes))
+    }
+
+    fn compute_machine_hash() -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        let mut sys = System::new_all();
+        sys.refresh_cpu();
+
+        if let Some(cpu) = sys.cpus().first() {
+            hasher.update(cpu.brand().as_bytes());
+        }
+
+        hasher.update(b"cortex_machine_binding_v1");
+
+        let hash = hasher.finalize();
+        let mut result = [0u8; 32];
+        result.copy_from_slice(&hash.as_bytes()[..32]);
+        result
     }
 
     fn get_session_path() -> PathBuf {
@@ -195,5 +229,6 @@ impl Drop for SessionData {
         self.encrypted_password.zeroize();
         self.nonce.zeroize();
         self.salt.zeroize();
+        self.machine_hash.zeroize();
     }
 }

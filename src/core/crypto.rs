@@ -6,7 +6,8 @@ use rand::{RngCore, rngs::OsRng};
 use sysinfo::{CpuExt, System, SystemExt};
 
 const TEST_DATA: &[u8] = b"cortex_test_data";
-const HARDWARE_SALT: &[u8] = b"cortex_hardware_salt_v1";
+const HARDWARE_SALT: &[u8] = b"cortex_hardware_salt_v2";
+const KDF_ITERATIONS: u32 = 100_000;
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
@@ -191,10 +192,16 @@ impl Crypto {
         hasher.update(password);
         hasher.update(&hardware_id);
 
-        let hash = hasher.finalize();
-        let key_bytes: [u8; 32] = hash.as_bytes()[..32]
-            .try_into()
-            .expect("Hash size mismatch");
+        let mut derived = hasher.finalize().as_bytes().to_vec();
+
+        for _ in 0..KDF_ITERATIONS {
+            let mut hasher = Hasher::new();
+            hasher.update(&derived);
+            hasher.update(&hardware_id);
+            derived = hasher.finalize().as_bytes().to_vec();
+        }
+
+        let key_bytes: [u8; 32] = derived[..32].try_into().expect("Hash size mismatch");
         Key::from(key_bytes)
     }
 

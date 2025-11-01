@@ -13,6 +13,15 @@ impl Storage {
         let db_path = Self::get_db_path();
         let db = sled::open(&db_path)?;
 
+        #[cfg(unix)]
+        {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(parent) = db_path.parent() {
+                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+            }
+        }
+
         Ok(Self { db })
     }
 
@@ -261,6 +270,14 @@ impl Storage {
         path.push("cortex");
 
         std::fs::create_dir_all(&path).ok();
+
+        #[cfg(unix)]
+        {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o700));
+        }
+
         path.push(".password-store");
         path
     }

@@ -1,8 +1,5 @@
 use crate::{
-    core::{
-        crypto::{Crypto, get_test_data},
-        types::SecureString,
-    },
+    core::{crypto::Crypto, types::SecureString},
     modules::{gateway::Gateway, password::Password},
     ui::prompt::UserPrompt,
 };
@@ -12,6 +9,8 @@ pub struct Reset;
 impl Reset {
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
+
+        let salt = storage.get_salt()?.ok_or("Database salt not found")?;
 
         let new_password = loop {
             let password = UserPrompt::password("New master password: ")?;
@@ -35,10 +34,11 @@ impl Reset {
 
         for (name, entry) in &entries {
             let decrypted = crypto.decrypt_entry(entry)?;
-            let password = String::from_utf8(decrypted)?;
+            let password_str = String::from_utf8(decrypted)?;
+            let password = SecureString::new(password_str);
             let description = crypto.decrypt_description(entry)?;
             let tags = crypto.decrypt_tags(entry)?;
-            decrypted_entries.push((name.clone(), SecureString::new(password), description, tags));
+            decrypted_entries.push((name.clone(), password, description, tags));
         }
 
         for (name, password, description, tags) in &decrypted_entries {
@@ -50,6 +50,7 @@ impl Reset {
 
             let new_entry = Crypto::encrypt_with_new_key(
                 &new_password,
+                &salt,
                 password.as_bytes(),
                 description.as_deref(),
                 tag_list,
@@ -57,8 +58,20 @@ impl Reset {
             storage.update_entry(name, &new_entry)?;
         }
 
-        let test_entry = Crypto::encrypt_with_new_key(&new_password, get_test_data(), None, None)?;
-        storage.update_entry("__init__", &test_entry)?;
+        let verification_data = Crypto::create_verification_data(&new_password, &salt);
+        storage.update_entry(
+            "__init__",
+            &crate::core::types::PasswordEntry {
+                encrypted_password: verification_data,
+                encrypted_description: None,
+                encrypted_tags: None,
+                nonce: [0u8; 12],
+                desc_nonce: None,
+                tags_nonce: None,
+                timestamp: crate::core::time::Time::current_timestamp(),
+            },
+        )?;
+
         storage.flush()?;
 
         println!("Master password reset.");

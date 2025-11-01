@@ -39,10 +39,12 @@ pub enum Commands {
         clip: Option<Option<u64>>,
     },
 
-    #[command(about = "List all stored password entries")]
-    List {
-        #[arg(short = 't', long = "tags", help = "Show tags for each entry")]
-        show_tags: bool,
+    #[command(about = "Edit password and description for existing entry")]
+    Edit {
+        #[arg(help = "Name of the password entry to edit")]
+        name: String,
+        #[arg(short = 't', long = "tags", help = "Replace tags (comma-separated)")]
+        tags: Option<String>,
     },
 
     #[command(about = "Delete a password entry")]
@@ -51,12 +53,10 @@ pub enum Commands {
         name: String,
     },
 
-    #[command(about = "Edit password and description for existing entry")]
-    Edit {
-        #[arg(help = "Name of the password entry to edit")]
-        name: String,
-        #[arg(short = 't', long = "tags", help = "Replace tags (comma-separated)")]
-        tags: Option<String>,
+    #[command(about = "List all stored password entries")]
+    List {
+        #[arg(short = 't', long = "tags", help = "Show tags for each entry")]
+        show_tags: bool,
     },
 
     #[command(about = "Search password entries by name, description, or tags")]
@@ -67,6 +67,33 @@ pub enum Commands {
         ignore_case: bool,
         #[arg(short, long, help = "Search only in names (not descriptions or tags)")]
         names_only: bool,
+    },
+
+    #[command(about = "Manage tags for password entries")]
+    Tag {
+        #[command(subcommand)]
+        action: TagAction,
+    },
+
+    #[command(about = "Generate strong passwords")]
+    Pass {
+        #[arg(short = 'l', long, help = "Password length", default_value = "16")]
+        length: usize,
+        #[arg(
+            short = 'c',
+            long,
+            help = "Number of passwords to generate",
+            default_value = "1"
+        )]
+        count: usize,
+        #[arg(short = 'u', long, help = "Include uppercase letters")]
+        uppercase: bool,
+        #[arg(short = 'w', long, help = "Include lowercase letters")]
+        lowercase: bool,
+        #[arg(short = 'd', long, help = "Include digits")]
+        digits: bool,
+        #[arg(short = 's', long, help = "Include special characters")]
+        special: bool,
     },
 
     #[command(about = "Export all passwords to JSON file")]
@@ -94,44 +121,17 @@ pub enum Commands {
     #[command(about = "Reset the master password")]
     Reset,
 
-    #[command(about = "Permanently purge the entire password database")]
-    Purge,
-
-    #[command(about = "Clear authentication session and require re-login")]
-    Lock,
-
     #[command(about = "Manage configuration settings")]
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
 
-    #[command(about = "Generate strong passwords")]
-    Pass {
-        #[arg(short = 'e', long, help = "Password length", default_value = "16")]
-        length: usize,
-        #[arg(
-            short = 'c',
-            long,
-            help = "Number of passwords to generate",
-            default_value = "1"
-        )]
-        count: usize,
-        #[arg(short = 'u', long, help = "Include uppercase letters")]
-        uppercase: bool,
-        #[arg(short = 'l', long, help = "Include lowercase letters")]
-        lowercase: bool,
-        #[arg(short = 'd', long, help = "Include digits")]
-        digits: bool,
-        #[arg(short = 's', long, help = "Include special characters")]
-        special: bool,
-    },
+    #[command(about = "Clear authentication session and require re-login")]
+    Lock,
 
-    #[command(about = "Manage tags for password entries")]
-    Tag {
-        #[command(subcommand)]
-        action: TagAction,
-    },
+    #[command(about = "Permanently purge the entire password database")]
+    Purge,
 }
 
 #[derive(Subcommand)]

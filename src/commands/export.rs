@@ -30,7 +30,11 @@ impl Export {
         }
 
         let (storage, crypto) = Gateway::login()?;
-        let warning_message = "This will export all passwords in plain text JSON format.";
+
+        println!("\nThis will export ALL passwords in PLAIN TEXT format!");
+        println!("Anyone with access to this file can read your passwords.");
+
+        let warning_message = "I understand this exports passwords in plain text";
         Security::confirmation(warning_message)?;
 
         let filename = format!("cortex_export_{:x}.json", Time::current_timestamp());
@@ -66,11 +70,20 @@ impl Export {
                                 tags,
                             });
                         }
-                        Err(_) => failed += 1,
+                        Err(_) => {
+                            eprintln!("Failed to decode password for: {}", name);
+                            failed += 1;
+                        }
                     },
-                    Err(_) => failed += 1,
+                    Err(e) => {
+                        eprintln!("Failed to decrypt entry '{}': {}", name, e);
+                        failed += 1;
+                    }
                 },
-                Err(_) => failed += 1,
+                Err(e) => {
+                    eprintln!("Failed to deserialize entry '{}': {}", name, e);
+                    failed += 1;
+                }
             }
         }
 
@@ -81,23 +94,32 @@ impl Export {
         };
 
         serde_json::to_writer_pretty(&mut writer, &export_data)?;
-
         writer.flush()?;
+
+        #[cfg(unix)]
+        {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&output_path, fs::Permissions::from_mode(0o600))?;
+        }
 
         if failed > 0 {
             eprintln!(
-                "Export completed with {} successful and {} failed entries",
+                "\nExport completed with {} successful and {} failed entries",
                 processed - failed,
                 failed
             );
         } else {
-            eprintln!("Export completed successfully with {} entries", processed);
+            eprintln!("\nExport completed successfully with {} entries", processed);
         }
 
         if processed - failed > 0 {
-            println!("Export completed to {}", output_path.display());
+            println!("\nExport saved to: {}", output_path.display());
+            println!("\nREMEMBER: This file contains UNENCRYPTED passwords!");
+            println!("Secure or delete it immediately after use.");
         } else {
             std::fs::remove_file(&output_path)?;
+            println!("No entries were successfully exported.");
         }
 
         Ok(())

@@ -19,10 +19,11 @@ impl Edit {
         let current_entry = match storage.get_password(&name)? {
             Some(entry) => {
                 let decrypted = crypto.decrypt_entry(&entry)?;
-                let password = String::from_utf8(decrypted)?;
+                let password_str = String::from_utf8(decrypted)?;
+                let password = SecureString::new(password_str);
                 let description = crypto.decrypt_description(&entry)?;
                 let existing_tags = crypto.decrypt_tags(&entry)?;
-                Some((SecureString::new(password), description, existing_tags))
+                Some((password, description, existing_tags))
             }
             None => None,
         };
@@ -83,8 +84,9 @@ impl Edit {
             return Ok(());
         }
 
+        let secure_password = SecureString::new(new_password);
         let entry =
-            crypto.create_entry(new_password.as_bytes(), description, tag_list.as_deref())?;
+            crypto.create_entry(secure_password.as_bytes(), description, tag_list.as_deref())?;
 
         if storage.edit_password(&name, &entry)? {
             println!("Edited for '{}'.", name);

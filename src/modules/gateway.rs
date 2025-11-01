@@ -12,10 +12,14 @@ impl Gateway {
 
         let storage = Storage::new()?;
 
+        let salt = storage
+            .get_salt()?
+            .ok_or("Database salt not found. Database may be corrupted.")?;
+
         if let Ok(Some(cached_password)) = Session::load_session() {
-            let crypto = Crypto::new(&cached_password);
-            if let Ok(Some(entry)) = storage.get_init_marker() {
-                if crypto.verify_test_data(&entry) {
+            let crypto = Crypto::new(&cached_password, &salt);
+            if let Ok(Some(verification_data)) = storage.get_verification_data() {
+                if Crypto::verify_password(&cached_password, &salt, &verification_data) {
                     return Ok((storage, crypto));
                 }
             }
@@ -25,10 +29,12 @@ impl Gateway {
         let mut failure = 0;
         loop {
             let master_password = UserPrompt::password("Master password: ")?;
-            let crypto = Crypto::new(&master_password);
+            let crypto = Crypto::new(&master_password, &salt);
 
-            let is_correct = match storage.get_init_marker()? {
-                Some(entry) => crypto.verify_test_data(&entry),
+            let is_correct = match storage.get_verification_data()? {
+                Some(verification_data) => {
+                    Crypto::verify_password(&master_password, &salt, &verification_data)
+                }
                 None => false,
             };
 

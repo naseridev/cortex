@@ -1,8 +1,5 @@
 use crate::{
-    core::{
-        crypto::{Crypto, get_test_data},
-        storage::Storage,
-    },
+    core::{crypto::Crypto, storage::Storage},
     modules::{password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
@@ -25,10 +22,15 @@ impl Init {
         let confirm_password = UserPrompt::password("Confirm password: ")?;
         Password::match_check(master_password.as_str(), confirm_password.as_str())?;
 
-        let entry = Crypto::new(&master_password).create_entry(get_test_data(), None, None)?;
-        Storage::new()?.init_db(&entry)?;
+        let salt = Crypto::generate_salt();
+
+        let verification_data = Crypto::create_verification_data(&master_password, &salt);
+
+        Storage::new()?.init_db(&verification_data, &salt)?;
 
         println!("Initialized.");
+        println!("\nIMPORTANT: Store your master password safely!");
+        println!("There is NO way to recover it if lost.");
 
         Ok(())
     }

@@ -5,17 +5,16 @@ use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce, aead::Aead};
 use rand::{RngCore, rngs::OsRng};
 use sysinfo::{CpuExt, System, SystemExt};
 
-const TEST_DATA: &[u8] = b"cortex_test_data";
-const HARDWARE_SALT: &[u8] = b"cortex_hardware_salt_v2";
-const KDF_ITERATIONS: u32 = 100_000;
+const KDF_ITERATIONS: u32 = 600_000;
+const FALLBACK_SALT: &[u8] = b"cortex_fallback_salt";
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
 }
 
 impl Crypto {
-    pub fn new(master_password: &SecureString) -> Self {
-        let cipher = ChaCha20Poly1305::new(&Self::derive_key(master_password.as_bytes()));
+    pub fn new(master_password: &SecureString, salt: &[u8]) -> Self {
+        let cipher = ChaCha20Poly1305::new(&Self::derive_key(master_password.as_bytes(), salt));
         Self { cipher }
     }
 
@@ -32,7 +31,7 @@ impl Crypto {
         let encrypted = self
             .cipher
             .encrypt(nonce, data)
-            .map_err(|_| "Encryption failed")?;
+            .map_err(|e| format!("Encryption failed: {:?}", e))?;
 
         let (encrypted_description, desc_nonce) = if let Some(desc) = description {
             let mut desc_nonce_bytes = [0u8; 12];
@@ -42,7 +41,7 @@ impl Crypto {
             let encrypted_desc = self
                 .cipher
                 .encrypt(desc_nonce, desc.as_bytes())
-                .map_err(|_| "Description encryption failed")?;
+                .map_err(|e| format!("Description encryption failed: {:?}", e))?;
 
             (Some(encrypted_desc), Some(desc_nonce_bytes))
         } else {
@@ -50,7 +49,8 @@ impl Crypto {
         };
 
         let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
-            let tags_json = serde_json::to_string(tag_list)?;
+            let tags_json = serde_json::to_string(tag_list)
+                .map_err(|e| format!("Tag serialization failed: {}", e))?;
             let mut tags_nonce_bytes = [0u8; 12];
             OsRng.fill_bytes(&mut tags_nonce_bytes);
             let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
@@ -58,7 +58,7 @@ impl Crypto {
             let encrypted_tags = self
                 .cipher
                 .encrypt(tags_nonce, tags_json.as_bytes())
-                .map_err(|_| "Tags encryption failed")?;
+                .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
 
             (Some(encrypted_tags), Some(tags_nonce_bytes))
         } else {
@@ -83,7 +83,7 @@ impl Crypto {
         let nonce = Nonce::from_slice(&entry.nonce);
         self.cipher
             .decrypt(nonce, entry.encrypted_password.as_ref())
-            .map_err(|_| "Decryption failed".into())
+            .map_err(|e| format!("Decryption failed: {:?}", e).into())
     }
 
     pub fn decrypt_description(
@@ -97,9 +97,11 @@ impl Crypto {
             let decrypted = self
                 .cipher
                 .decrypt(nonce, encrypted_desc.as_ref())
-                .map_err(|_| "Description decryption failed")?;
+                .map_err(|e| format!("Description decryption failed: {:?}", e))?;
 
-            Ok(Some(String::from_utf8(decrypted)?))
+            Ok(Some(String::from_utf8(decrypted).map_err(|e| {
+                format!("Invalid UTF-8 in description: {}", e)
+            })?))
         } else {
             Ok(None)
         }
@@ -115,35 +117,51 @@ impl Crypto {
             let decrypted = self
                 .cipher
                 .decrypt(nonce, encrypted_tags.as_ref())
-                .map_err(|_| "Tags decryption failed")?;
+                .map_err(|e| format!("Tags decryption failed: {:?}", e))?;
 
-            let tags: Vec<String> = serde_json::from_slice(&decrypted)?;
+            let tags: Vec<String> = serde_json::from_slice(&decrypted)
+                .map_err(|e| format!("Tag deserialization failed: {}", e))?;
             Ok(tags)
         } else {
             Ok(Vec::new())
         }
     }
 
-    pub fn verify_test_data(&self, entry: &PasswordEntry) -> bool {
-        self.decrypt_entry(entry)
-            .map(|d| d == TEST_DATA)
-            .unwrap_or(false)
+    pub fn verify_password(
+        master_password: &SecureString,
+        salt: &[u8],
+        verification_data: &[u8],
+    ) -> bool {
+        let derived_key = Self::derive_key(master_password.as_bytes(), salt);
+        let mut hasher = Hasher::new();
+        hasher.update(derived_key.as_slice());
+        let computed_hash = hasher.finalize();
+
+        computed_hash.as_bytes() == verification_data
+    }
+
+    pub fn create_verification_data(master_password: &SecureString, salt: &[u8]) -> Vec<u8> {
+        let derived_key = Self::derive_key(master_password.as_bytes(), salt);
+        let mut hasher = Hasher::new();
+        hasher.update(derived_key.as_slice());
+        hasher.finalize().as_bytes().to_vec()
     }
 
     pub fn encrypt_with_new_key(
         new_password: &SecureString,
+        salt: &[u8],
         data: &[u8],
         description: Option<&str>,
         tags: Option<&[String]>,
     ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
-        let new_cipher = ChaCha20Poly1305::new(&Self::derive_key(new_password.as_bytes()));
+        let new_cipher = ChaCha20Poly1305::new(&Self::derive_key(new_password.as_bytes(), salt));
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let encrypted = new_cipher
             .encrypt(nonce, data)
-            .map_err(|_| "Encryption failed")?;
+            .map_err(|e| format!("Encryption failed: {:?}", e))?;
 
         let (encrypted_description, desc_nonce) = if let Some(desc) = description {
             let mut desc_nonce_bytes = [0u8; 12];
@@ -152,7 +170,7 @@ impl Crypto {
 
             let encrypted_desc = new_cipher
                 .encrypt(desc_nonce, desc.as_bytes())
-                .map_err(|_| "Description encryption failed")?;
+                .map_err(|e| format!("Description encryption failed: {:?}", e))?;
 
             (Some(encrypted_desc), Some(desc_nonce_bytes))
         } else {
@@ -160,14 +178,15 @@ impl Crypto {
         };
 
         let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
-            let tags_json = serde_json::to_string(tag_list)?;
+            let tags_json = serde_json::to_string(tag_list)
+                .map_err(|e| format!("Tag serialization failed: {}", e))?;
             let mut tags_nonce_bytes = [0u8; 12];
             OsRng.fill_bytes(&mut tags_nonce_bytes);
             let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
 
             let encrypted_tags = new_cipher
                 .encrypt(tags_nonce, tags_json.as_bytes())
-                .map_err(|_| "Tags encryption failed")?;
+                .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
 
             (Some(encrypted_tags), Some(tags_nonce_bytes))
         } else {
@@ -185,19 +204,19 @@ impl Crypto {
         })
     }
 
-    fn derive_key(password: &[u8]) -> Key {
+    fn derive_key(password: &[u8], salt: &[u8]) -> Key {
         use crate::core::config::Config;
 
         let config = Config::load().unwrap_or_default();
         let hardware_id = if config.hardware_binding_enabled {
             Self::get_hardware_id()
         } else {
-            HARDWARE_SALT.to_vec()
+            FALLBACK_SALT.to_vec()
         };
 
         let mut hasher = Hasher::new();
-
         hasher.update(password);
+        hasher.update(salt);
         hasher.update(&hardware_id);
 
         let mut derived = hasher.finalize().as_bytes().to_vec();
@@ -205,6 +224,7 @@ impl Crypto {
         for _ in 0..KDF_ITERATIONS {
             let mut hasher = Hasher::new();
             hasher.update(&derived);
+            hasher.update(salt);
             hasher.update(&hardware_id);
             derived = hasher.finalize().as_bytes().to_vec();
         }
@@ -225,11 +245,13 @@ impl Crypto {
             }
         }
 
-        hasher.update(HARDWARE_SALT);
+        hasher.update(b"cortex_hardware_binding");
         hasher.finalize().as_bytes().to_vec()
     }
-}
 
-pub fn get_test_data() -> &'static [u8] {
-    TEST_DATA
+    pub fn generate_salt() -> [u8; 32] {
+        let mut salt = [0u8; 32];
+        OsRng.fill_bytes(&mut salt);
+        salt
+    }
 }

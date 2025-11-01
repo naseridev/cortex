@@ -52,11 +52,9 @@ impl Create {
             None
         };
 
-        let entry = crypto.create_entry(
-            &SecureString::new(password).as_bytes(),
-            description,
-            tag_list.as_deref(),
-        )?;
+        let secure_password = SecureString::new(password);
+        let entry =
+            crypto.create_entry(secure_password.as_bytes(), description, tag_list.as_deref())?;
 
         if storage.create_password(&name, &entry)? {
             println!("Created '{}'.", name);

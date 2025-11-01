@@ -11,7 +11,7 @@ use zeroize::Zeroize;
 
 const SESSION_FILE: &str = ".cortex_session";
 const MAX_SESSION_AGE: u64 = 86400;
-const SESSION_KDF_ITERATIONS: u32 = 50_000;
+const SESSION_KDF_ITERATIONS: u32 = 300_000;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SessionData {
@@ -172,8 +172,6 @@ impl Session {
     }
 
     fn derive_session_key(salt: &[u8; 32]) -> Result<Key, Box<dyn std::error::Error>> {
-        use crate::core::config::Config;
-
         let config = Config::load().unwrap_or_default();
         let mut hasher = Hasher::new();
 
@@ -205,8 +203,6 @@ impl Session {
     }
 
     fn compute_machine_hash() -> [u8; 32] {
-        use crate::core::config::Config;
-
         let config = Config::load().unwrap_or_default();
         let mut hasher = Hasher::new();
 

@@ -38,8 +38,19 @@ impl Export {
         Security::confirmation(warning_message)?;
 
         let filename = format!("cortex_export_{:x}.json", Time::current_timestamp());
+        let temp_filename = format!("{}.tmp", filename);
         let output_path = PathBuf::from(&filename);
-        let file = File::create(&output_path)?;
+        let temp_path = PathBuf::from(&temp_filename);
+
+        let file = File::create(&temp_path)?;
+
+        #[cfg(unix)]
+        {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
+        }
+
         let mut writer = BufWriter::with_capacity(64 * 1024, file);
 
         let mut entries = Vec::new();
@@ -88,13 +99,16 @@ impl Export {
         }
 
         let export_data = ExportData {
-            version: "2.1.0".to_string(),
+            version: "3.0.0".to_string(),
             timestamp: Time::current_timestamp(),
             entries,
         };
 
         serde_json::to_writer_pretty(&mut writer, &export_data)?;
         writer.flush()?;
+        drop(writer);
+
+        std::fs::rename(&temp_path, &output_path)?;
 
         #[cfg(unix)]
         {
@@ -155,7 +169,7 @@ impl Export {
         ];
 
         let template_data = ExportData {
-            version: "2.1.0".to_string(),
+            version: "3.0.0".to_string(),
             timestamp: Time::current_timestamp(),
             entries: sample_entries,
         };

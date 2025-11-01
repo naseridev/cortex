@@ -1,5 +1,4 @@
 use rand::{RngCore, rngs::OsRng};
-use regex::Regex;
 
 pub struct Password;
 
@@ -149,7 +148,7 @@ impl Password {
     }
 
     fn in_desc_found(password: &str, description: &str) -> bool {
-        if password.len() < 3 {
+        if password.len() < 3 || description.is_empty() {
             return false;
         }
 
@@ -160,28 +159,29 @@ impl Password {
             return true;
         }
 
+        if description.len() < 3 {
+            return false;
+        }
+
         let password_chars: Vec<char> = password_lower.chars().collect();
         let description_chars: Vec<char> = description_lower.chars().collect();
 
-        for window_size in (password.len().min(8)..=password.len()).rev() {
+        let min_window = password.len().max(3) / 2;
+
+        for window_size in (min_window..=password.len()).rev() {
+            if window_size > description.len() {
+                continue;
+            }
+
             for window in password_chars.windows(window_size) {
                 let pattern: String = window.iter().collect();
-                if pattern.len() >= 3
-                    && description_chars.windows(window_size).any(|desc_window| {
-                        let desc_pattern: String = desc_window.iter().collect();
-                        desc_pattern == pattern
-                    })
-                {
+
+                if description_chars.windows(window_size).any(|desc_window| {
+                    let desc_pattern: String = desc_window.iter().collect();
+                    desc_pattern == pattern
+                }) {
                     return true;
                 }
-            }
-        }
-
-        let regex_pattern = format!(r"(?i){}", regex::escape(password));
-
-        if let Ok(re) = Regex::new(&regex_pattern) {
-            if re.is_match(description) {
-                return true;
             }
         }
 

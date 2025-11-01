@@ -1,6 +1,6 @@
 use crate::{
     core::types::SecureString,
-    modules::{gateway::Gateway, password::Password, validation::Validation},
+    modules::{gateway::Gateway, password::Password, tags::TagValidator, validation::Validation},
     ui::prompt::UserPrompt,
 };
 
@@ -9,7 +9,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Create;
 
 impl Create {
-    pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn new(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.is_empty() {
             return Err("Invalid account name".into());
         }
@@ -43,10 +43,28 @@ impl Create {
             Some(description_input.as_str())
         };
 
-        let entry = crypto.create_entry(&SecureString::new(password).as_bytes(), description)?;
+        let tag_list = if let Some(tag_string) = tags {
+            let parsed = TagValidator::parse_input(&tag_string);
+            let normalized = TagValidator::normalize(&parsed);
+            TagValidator::validate(&normalized)?;
+            Some(normalized)
+        } else {
+            None
+        };
+
+        let entry = crypto.create_entry(
+            &SecureString::new(password).as_bytes(),
+            description,
+            tag_list.as_deref(),
+        )?;
 
         if storage.create_password(&name, &entry)? {
             println!("Created '{}'.", name);
+            if let Some(tags) = tag_list {
+                if !tags.is_empty() {
+                    println!("Tags: {}", tags.join(", "));
+                }
+            }
         }
 
         Ok(())

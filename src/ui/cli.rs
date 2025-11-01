@@ -22,6 +22,8 @@ pub enum Commands {
     Create {
         #[arg(help = "Name/identifier for the password entry")]
         name: String,
+        #[arg(short = 't', long = "tags", help = "Comma-separated tags")]
+        tags: Option<String>,
     },
 
     #[command(about = "Retrieve a password entry")]
@@ -38,7 +40,10 @@ pub enum Commands {
     },
 
     #[command(about = "List all stored password entries")]
-    List,
+    List {
+        #[arg(short = 't', long = "tags", help = "Show tags for each entry")]
+        show_tags: bool,
+    },
 
     #[command(about = "Delete a password entry")]
     Delete {
@@ -50,15 +55,17 @@ pub enum Commands {
     Edit {
         #[arg(help = "Name of the password entry to edit")]
         name: String,
+        #[arg(short = 't', long = "tags", help = "Replace tags (comma-separated)")]
+        tags: Option<String>,
     },
 
-    #[command(about = "Search password entries by name or description")]
+    #[command(about = "Search password entries by name, description, or tags")]
     Find {
         #[arg(help = "Search pattern (supports regex)")]
         pattern: String,
         #[arg(short, long, help = "Case insensitive search")]
         ignore_case: bool,
-        #[arg(short, long, help = "Search only in names (not descriptions)")]
+        #[arg(short, long, help = "Search only in names (not descriptions or tags)")]
         names_only: bool,
     },
 
@@ -119,6 +126,12 @@ pub enum Commands {
         #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
     },
+
+    #[command(about = "Manage tags for password entries")]
+    Tag {
+        #[command(subcommand)]
+        action: TagAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -130,5 +143,27 @@ pub enum ConfigAction {
     SetTimeout {
         #[arg(help = "Timeout in seconds (60-86400)")]
         seconds: u64,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TagAction {
+    #[command(about = "List all tags with usage counts")]
+    List,
+
+    #[command(about = "Add tags to an entry")]
+    Add {
+        #[arg(help = "Entry name")]
+        name: String,
+        #[arg(help = "Comma-separated tags to add")]
+        tags: String,
+    },
+
+    #[command(about = "Remove tags from an entry")]
+    Remove {
+        #[arg(help = "Entry name")]
+        name: String,
+        #[arg(help = "Comma-separated tags to remove")]
+        tags: String,
     },
 }

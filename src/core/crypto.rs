@@ -22,6 +22,7 @@ impl Crypto {
         &self,
         data: &[u8],
         description: Option<&str>,
+        tags: Option<&[String]>,
     ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -47,11 +48,29 @@ impl Crypto {
             (None, None)
         };
 
+        let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
+            let tags_json = serde_json::to_string(tag_list)?;
+            let mut tags_nonce_bytes = [0u8; 12];
+            OsRng.fill_bytes(&mut tags_nonce_bytes);
+            let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
+
+            let encrypted_tags = self
+                .cipher
+                .encrypt(tags_nonce, tags_json.as_bytes())
+                .map_err(|_| "Tags encryption failed")?;
+
+            (Some(encrypted_tags), Some(tags_nonce_bytes))
+        } else {
+            (None, None)
+        };
+
         Ok(PasswordEntry {
             encrypted_password: encrypted,
             encrypted_description,
+            encrypted_tags,
             nonce: nonce_bytes,
             desc_nonce,
+            tags_nonce,
             timestamp: Time::current_timestamp(),
         })
     }
@@ -85,6 +104,25 @@ impl Crypto {
         }
     }
 
+    pub fn decrypt_tags(
+        &self,
+        entry: &PasswordEntry,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        if let (Some(encrypted_tags), Some(tags_nonce)) = (&entry.encrypted_tags, &entry.tags_nonce)
+        {
+            let nonce = Nonce::from_slice(tags_nonce);
+            let decrypted = self
+                .cipher
+                .decrypt(nonce, encrypted_tags.as_ref())
+                .map_err(|_| "Tags decryption failed")?;
+
+            let tags: Vec<String> = serde_json::from_slice(&decrypted)?;
+            Ok(tags)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     pub fn verify_test_data(&self, entry: &PasswordEntry) -> bool {
         self.decrypt_entry(entry)
             .map(|d| d == TEST_DATA)
@@ -95,6 +133,7 @@ impl Crypto {
         new_password: &SecureString,
         data: &[u8],
         description: Option<&str>,
+        tags: Option<&[String]>,
     ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
         let new_cipher = ChaCha20Poly1305::new(&Self::derive_key(new_password.as_bytes()));
         let mut nonce_bytes = [0u8; 12];
@@ -119,11 +158,28 @@ impl Crypto {
             (None, None)
         };
 
+        let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
+            let tags_json = serde_json::to_string(tag_list)?;
+            let mut tags_nonce_bytes = [0u8; 12];
+            OsRng.fill_bytes(&mut tags_nonce_bytes);
+            let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
+
+            let encrypted_tags = new_cipher
+                .encrypt(tags_nonce, tags_json.as_bytes())
+                .map_err(|_| "Tags encryption failed")?;
+
+            (Some(encrypted_tags), Some(tags_nonce_bytes))
+        } else {
+            (None, None)
+        };
+
         Ok(PasswordEntry {
             encrypted_password: encrypted,
             encrypted_description,
+            encrypted_tags,
             nonce: nonce_bytes,
             desc_nonce,
+            tags_nonce,
             timestamp: Time::current_timestamp(),
         })
     }

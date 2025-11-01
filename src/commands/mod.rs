@@ -12,3 +12,4 @@ pub mod lock;
 pub mod pass;
 pub mod purge;
 pub mod reset;
+pub mod tag;

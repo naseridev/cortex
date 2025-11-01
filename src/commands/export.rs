@@ -18,6 +18,7 @@ struct ExportEntry {
     name: String,
     password: String,
     description: Option<String>,
+    tags: Vec<String>,
 }
 
 pub struct Export;
@@ -57,10 +58,12 @@ impl Export {
                     Ok(decrypted_bytes) => match String::from_utf8(decrypted_bytes) {
                         Ok(password) => {
                             let description = crypto.decrypt_description(&entry).ok().flatten();
+                            let tags = crypto.decrypt_tags(&entry).unwrap_or_default();
                             entries.push(ExportEntry {
                                 name,
                                 password,
                                 description,
+                                tags,
                             });
                         }
                         Err(_) => failed += 1,
@@ -72,7 +75,7 @@ impl Export {
         }
 
         let export_data = ExportData {
-            version: "2.0.0".to_string(),
+            version: "2.1.0".to_string(),
             timestamp: Time::current_timestamp(),
             entries,
         };
@@ -111,11 +114,13 @@ impl Export {
                 name: "heisenberg".to_string(),
                 password: "1AmTh3D4ng3r!".to_string(),
                 description: Some("Say my name - I am the one who knocks".to_string()),
+                tags: vec!["work".to_string(), "critical".to_string()],
             },
             ExportEntry {
                 name: "los-pollos".to_string(),
                 password: "Gustu5Fr!ng2024".to_string(),
                 description: Some("A man provides for his family".to_string()),
+                tags: vec!["business".to_string(), "finance".to_string()],
             },
             ExportEntry {
                 name: "saul-goodman".to_string(),
@@ -123,11 +128,12 @@ impl Export {
                 description: Some(
                     "Did you know you have rights? Constitution says you do".to_string(),
                 ),
+                tags: vec!["legal".to_string(), "contacts".to_string()],
             },
         ];
 
         let template_data = ExportData {
-            version: "2.0.0".to_string(),
+            version: "2.1.0".to_string(),
             timestamp: Time::current_timestamp(),
             entries: sample_entries,
         };

@@ -1,6 +1,6 @@
 use crate::{
     core::types::SecureString,
-    modules::{gateway::Gateway, password::Password},
+    modules::{gateway::Gateway, password::Password, tags::TagValidator},
 };
 use serde::Deserialize;
 use std::{fs::File, io::BufReader, path::Path};
@@ -19,6 +19,8 @@ struct ImportEntry {
     name: String,
     password: String,
     description: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 pub struct Import;
@@ -88,6 +90,13 @@ impl Import {
                 }
             }
 
+            let normalized_tags = TagValidator::normalize(&entry.tags);
+            if let Err(e) = TagValidator::validate(&normalized_tags) {
+                eprintln!("Skipping '{}': {}", entry.name, e);
+                failed += 1;
+                continue;
+            }
+
             let exists = storage.entry_exists(&entry.name)?;
 
             if exists && !overwrite {
@@ -99,9 +108,16 @@ impl Import {
                 continue;
             }
 
+            let tag_list = if normalized_tags.is_empty() {
+                None
+            } else {
+                Some(normalized_tags.as_slice())
+            };
+
             match crypto.create_entry(
                 &SecureString::new(entry.password.clone()).as_bytes(),
                 entry.description.as_deref(),
+                tag_list,
             ) {
                 Ok(password_entry) => {
                     let result = if exists {

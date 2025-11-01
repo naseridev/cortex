@@ -14,7 +14,8 @@ use cortex::{
     commands::pass::Pass,
     commands::purge::Purge,
     commands::reset::Reset,
-    ui::cli::{Cli, Commands, ConfigAction},
+    commands::tag::Tag,
+    ui::cli::{Cli, Commands, ConfigAction, TagAction},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,11 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Init => Init::new(),
-        Commands::Create { name } => Create::new(name),
+        Commands::Create { name, tags } => Create::new(name, tags),
         Commands::Get { name, clip } => Get::new(name, clip),
-        Commands::List => List::new(),
+        Commands::List { show_tags } => List::new(show_tags),
         Commands::Delete { name } => Delete::new(name),
-        Commands::Edit { name } => Edit::new(name),
+        Commands::Edit { name, tags } => Edit::new(name, tags),
         Commands::Find {
             pattern,
             ignore_case,
@@ -50,5 +51,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             digits,
             special,
         } => Pass::new(length, count, uppercase, lowercase, digits, special),
+        Commands::Tag { action } => match action {
+            TagAction::List => Tag::list(),
+            TagAction::Add { name, tags } => {
+                use cortex::modules::tags::TagValidator;
+                let tag_list = TagValidator::parse_input(&tags);
+                Tag::add(name, tag_list)
+            }
+            TagAction::Remove { name, tags } => {
+                use cortex::modules::tags::TagValidator;
+                let tag_list = TagValidator::parse_input(&tags);
+                Tag::remove(name, tag_list)
+            }
+        },
     }
 }

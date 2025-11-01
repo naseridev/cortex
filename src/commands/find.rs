@@ -37,8 +37,26 @@ impl Find {
                 }
             };
 
-            if name_match || desc_match {
-                results.push((name, description, name_match, desc_match));
+            let entry_tags = match crypto.decrypt_tags(&entry) {
+                Ok(tags) => tags,
+                Err(_) => Vec::new(),
+            };
+
+            let tag_match = if !names_only {
+                entry_tags.iter().any(|tag| re.is_match(tag))
+            } else {
+                false
+            };
+
+            if name_match || desc_match || tag_match {
+                results.push((
+                    name,
+                    description,
+                    entry_tags,
+                    name_match,
+                    desc_match,
+                    tag_match,
+                ));
             }
         }
 
@@ -57,15 +75,23 @@ impl Find {
 
         println!();
 
-        for (name, description, name_match, desc_match) in results.iter().take(20) {
+        for (name, description, tags, name_match, desc_match, tag_match) in results.iter().take(20)
+        {
             println!("Entry: {}", name);
 
-            if *name_match && *desc_match {
-                println!("  >> Matches: name and description");
-            } else if *name_match {
-                println!("  >> Matches: name");
-            } else if *desc_match {
-                println!("  >> Matches: description");
+            let mut matches = Vec::new();
+            if *name_match {
+                matches.push("name");
+            }
+            if *desc_match {
+                matches.push("description");
+            }
+            if *tag_match {
+                matches.push("tags");
+            }
+
+            if !matches.is_empty() {
+                println!("  >> Matches: {}", matches.join(" and "));
             }
 
             if let Some(desc) = description {
@@ -75,6 +101,10 @@ impl Find {
                     desc.clone()
                 };
                 println!("  Description: {}", display_desc);
+            }
+
+            if !tags.is_empty() {
+                println!("  Tags: {}", tags.join(", "));
             }
 
             println!();

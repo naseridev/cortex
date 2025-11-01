@@ -1,6 +1,6 @@
 use crate::{
     core::types::SecureString,
-    modules::{gateway::Gateway, password::Password},
+    modules::{gateway::Gateway, password::Password, tags::TagValidator},
     ui::prompt::UserPrompt,
 };
 
@@ -9,7 +9,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Edit;
 
 impl Edit {
-    pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn new(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") {
             return Err("Cannot edit system entries".into());
         }
@@ -21,7 +21,8 @@ impl Edit {
                 let decrypted = crypto.decrypt_entry(&entry)?;
                 let password = String::from_utf8(decrypted)?;
                 let description = crypto.decrypt_description(&entry)?;
-                Some((SecureString::new(password), description))
+                let existing_tags = crypto.decrypt_tags(&entry)?;
+                Some((SecureString::new(password), description, existing_tags))
             }
             None => None,
         };
@@ -29,7 +30,7 @@ impl Edit {
         let new_password_input = UserPrompt::text("New password (Enter to keep current): ")?;
         let new_password = if new_password_input.is_empty() {
             match &current_entry {
-                Some((password, _)) => password.as_str().to_string(),
+                Some((password, _, _)) => password.as_str().to_string(),
                 None => return Err("No current password found".into()),
             }
         } else {
@@ -48,18 +49,31 @@ impl Edit {
 
         let description = if description_input.is_empty() {
             match &current_entry {
-                Some((_, desc)) => desc.as_deref(),
+                Some((_, desc, _)) => desc.as_deref(),
                 None => None,
             }
         } else {
             Password::in_desc_check(&new_password, &description_input)?;
-
             Some(description_input.as_str())
         };
 
+        let tag_list = if let Some(tag_string) = tags {
+            let parsed = TagValidator::parse_input(&tag_string);
+            let normalized = TagValidator::normalize(&parsed);
+            TagValidator::validate(&normalized)?;
+            Some(normalized)
+        } else {
+            match &current_entry {
+                Some((_, _, existing_tags)) => Some(existing_tags.clone()),
+                None => None,
+            }
+        };
+
         let no_changes = match &current_entry {
-            Some((current_password, current_desc)) => {
-                new_password == current_password.as_str() && description == current_desc.as_deref()
+            Some((current_password, current_desc, current_tags)) => {
+                new_password == current_password.as_str()
+                    && description == current_desc.as_deref()
+                    && tag_list.as_ref() == Some(current_tags)
             }
             None => false,
         };
@@ -69,7 +83,8 @@ impl Edit {
             return Ok(());
         }
 
-        let entry = crypto.create_entry(new_password.as_bytes(), description)?;
+        let entry =
+            crypto.create_entry(new_password.as_bytes(), description, tag_list.as_deref())?;
 
         if storage.edit_password(&name, &entry)? {
             println!("Edited for '{}'.", name);

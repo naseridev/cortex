@@ -13,14 +13,17 @@ pub struct ExportEntry {
     pub name: String,
     pub password: String,
     pub description: Option<String>,
+    pub tags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PasswordEntry {
     pub encrypted_password: Vec<u8>,
     pub encrypted_description: Option<Vec<u8>>,
+    pub encrypted_tags: Option<Vec<u8>>,
     pub nonce: [u8; 12],
     pub desc_nonce: Option<[u8; 12]>,
+    pub tags_nonce: Option<[u8; 12]>,
     pub timestamp: u64,
 }
 

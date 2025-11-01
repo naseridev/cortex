@@ -37,19 +37,27 @@ impl Reset {
             let decrypted = crypto.decrypt_entry(entry)?;
             let password = String::from_utf8(decrypted)?;
             let description = crypto.decrypt_description(entry)?;
-            decrypted_entries.push((name.clone(), SecureString::new(password), description));
+            let tags = crypto.decrypt_tags(entry)?;
+            decrypted_entries.push((name.clone(), SecureString::new(password), description, tags));
         }
 
-        for (name, password, description) in &decrypted_entries {
+        for (name, password, description, tags) in &decrypted_entries {
+            let tag_list = if tags.is_empty() {
+                None
+            } else {
+                Some(tags.as_slice())
+            };
+
             let new_entry = Crypto::encrypt_with_new_key(
                 &new_password,
                 password.as_bytes(),
                 description.as_deref(),
+                tag_list,
             )?;
             storage.update_entry(name, &new_entry)?;
         }
 
-        let test_entry = Crypto::encrypt_with_new_key(&new_password, get_test_data(), None)?;
+        let test_entry = Crypto::encrypt_with_new_key(&new_password, get_test_data(), None, None)?;
         storage.update_entry("__init__", &test_entry)?;
         storage.flush()?;
 

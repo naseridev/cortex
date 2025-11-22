@@ -4,7 +4,7 @@ use std::process;
 pub struct Pass;
 
 impl Pass {
-    pub fn new(
+    pub fn execute(
         length: usize,
         count: usize,
         uppercase: bool,
@@ -22,7 +22,7 @@ impl Pass {
             process::exit(1);
         }
 
-        if count < 1 || count > 50 {
+        if !(1..=50).contains(&count) {
             eprintln!("Error: Count must be between 1 and 50.");
             process::exit(1);
         }

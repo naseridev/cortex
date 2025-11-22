@@ -4,7 +4,7 @@ use regex::Regex;
 pub struct Find;
 
 impl Find {
-    pub fn new(
+    pub fn execute(
         pattern: String,
         ignore_case: bool,
         names_only: bool,
@@ -37,10 +37,7 @@ impl Find {
                 }
             };
 
-            let entry_tags = match crypto.decrypt_tags(&entry) {
-                Ok(tags) => tags,
-                Err(_) => Vec::new(),
-            };
+            let entry_tags = crypto.decrypt_tags(&entry).unwrap_or_default();
 
             let tag_match = if !names_only {
                 entry_tags.iter().any(|tag| re.is_match(tag))

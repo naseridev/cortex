@@ -3,7 +3,7 @@ use crate::modules::gateway::Gateway;
 pub struct List;
 
 impl List {
-    pub fn new(_: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(_: bool) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
         let mut entries = Vec::new();

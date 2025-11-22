@@ -9,7 +9,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Edit;
 
 impl Edit {
-    pub fn new(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") {
             return Err("Cannot edit system entries".into());
         }
@@ -64,10 +64,9 @@ impl Edit {
             TagValidator::validate(&normalized)?;
             Some(normalized)
         } else {
-            match &current_entry {
-                Some((_, _, existing_tags)) => Some(existing_tags.clone()),
-                None => None,
-            }
+            current_entry
+                .as_ref()
+                .map(|(_, _, existing_tags)| existing_tags.clone())
         };
 
         let no_changes = match &current_entry {

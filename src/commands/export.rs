@@ -24,7 +24,7 @@ struct ExportEntry {
 pub struct Export;
 
 impl Export {
-    pub fn new(template: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(template: bool) -> Result<(), Box<dyn std::error::Error>> {
         if template {
             return Self::export_template();
         }

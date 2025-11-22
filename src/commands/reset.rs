@@ -7,7 +7,7 @@ use crate::{
 pub struct Reset;
 
 impl Reset {
-    pub fn new() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
         println!("Creating backup before reset...");

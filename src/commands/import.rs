@@ -26,7 +26,7 @@ struct ImportEntry {
 pub struct Import;
 
 impl Import {
-    pub fn new(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
         if file_path.is_empty() {
             return Err("File path cannot be empty".into());
         }
@@ -55,7 +55,7 @@ impl Import {
 
         for entry in import_data.entries {
             if entry.name.is_empty() {
-                validation_errors.push(format!("Entry with empty name"));
+                validation_errors.push("Entry with empty name".to_string());
                 continue;
             }
 
@@ -129,7 +129,7 @@ impl Import {
             };
 
             match crypto.create_entry(
-                &SecureString::new(entry.password.clone()).as_bytes(),
+                SecureString::new(entry.password.clone()).as_bytes(),
                 entry.description.as_deref(),
                 tag_list,
             ) {

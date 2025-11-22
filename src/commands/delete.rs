@@ -3,7 +3,7 @@ use crate::modules::{gateway::Gateway, validation::Validation};
 pub struct Delete;
 
 impl Delete {
-    pub fn new(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(name: String) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") {
             return Err("Cannot delete system entries".into());
         }

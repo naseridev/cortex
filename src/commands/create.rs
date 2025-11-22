@@ -9,7 +9,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Create;
 
 impl Create {
-    pub fn new(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.is_empty() {
             return Err("Invalid account name".into());
         }

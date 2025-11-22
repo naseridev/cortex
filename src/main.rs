@@ -22,22 +22,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init => Init::new(),
-        Commands::Create { name, tags } => Create::new(name, tags),
-        Commands::Get { name, clip } => Get::new(name, clip),
-        Commands::List { show_tags } => List::new(show_tags),
-        Commands::Delete { name } => Delete::new(name),
-        Commands::Edit { name, tags } => Edit::new(name, tags),
+        Commands::Init => Init::execute(),
+        Commands::Create { name, tags } => Create::execute(name, tags),
+        Commands::Get { name, clip } => Get::execute(name, clip),
+        Commands::List { show_tags } => List::execute(show_tags),
+        Commands::Delete { name } => Delete::execute(name),
+        Commands::Edit { name, tags } => Edit::execute(name, tags),
         Commands::Find {
             pattern,
             ignore_case,
             names_only,
-        } => Find::new(pattern, ignore_case, names_only),
-        Commands::Export { template } => Export::new(template),
-        Commands::Import { file, overwrite } => Import::new(file, overwrite),
-        Commands::Reset => Reset::new(),
-        Commands::Purge => Purge::new(),
-        Commands::Lock => Lock::new(),
+        } => Find::execute(pattern, ignore_case, names_only),
+        Commands::Export { template } => Export::execute(template),
+        Commands::Import { file, overwrite } => Import::execute(file, overwrite),
+        Commands::Reset => Reset::execute(),
+        Commands::Purge => Purge::execute(),
+        Commands::Lock => Lock::execute(),
         Commands::Config { action } => match action {
             Some(ConfigAction::Show) => ConfigCmd::show(),
             Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             lowercase,
             digits,
             special,
-        } => Pass::new(length, count, uppercase, lowercase, digits, special),
+        } => Pass::execute(length, count, uppercase, lowercase, digits, special),
         Commands::Tag { action } => match action {
             TagAction::List => Tag::list(),
             TagAction::Add { name, tags } => {

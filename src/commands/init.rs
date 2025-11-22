@@ -7,7 +7,7 @@ use crate::{
 pub struct Init;
 
 impl Init {
-    pub fn new() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
         Validation::storage_probe(
             false,
             "Database already exists. Use a different path or remove existing database.",
@@ -16,7 +16,7 @@ impl Init {
         let master_password = UserPrompt::password("Master password: ")?;
 
         if let Err(msg) = Password::security_check(master_password.as_str()) {
-            return Err(format!("{}", msg).into());
+            return Err(msg.into());
         }
 
         let confirm_password = UserPrompt::password("Confirm password: ")?;

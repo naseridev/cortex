@@ -6,7 +6,10 @@ use crate::{
 pub struct Get;
 
 impl Get {
-    pub fn new(name: String, clip: Option<Option<u64>>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(
+        name: String,
+        clip: Option<Option<u64>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
         match storage.get_password(&name)? {
@@ -19,7 +22,7 @@ impl Get {
                     let seconds = duration.unwrap_or(43);
                     Clipboard::copy(password.as_str())?;
 
-                    if seconds > 540 || seconds < 3 {
+                    if !(3..=540).contains(&seconds) {
                         return Err("The time to be distracted is only allowed to be between 3 and 540 seconds".into());
                     }
 

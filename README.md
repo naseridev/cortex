@@ -215,9 +215,12 @@ Contributions welcome! Please:
 ### Development Setup
 ```bash
 git clone https://github.com/naseridev/cortex.git
+```
+```bash
 cd cortex
+```
+```bash
 cargo build
-cargo test
 ```
 
 ## Author

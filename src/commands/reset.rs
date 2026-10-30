@@ -18,8 +18,8 @@ impl Reset {
             let password = UserPrompt::password("New master password: ")?;
 
             match Password::security_check(password.as_str()) {
-                Ok(_) => break password,
-                Err(msg) => eprintln!("Error: {}\n", msg),
+                Ok(()) => break password,
+                Err(msg) => eprintln!("Error: {msg}\n"),
             }
         };
 

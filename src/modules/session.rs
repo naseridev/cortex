@@ -29,7 +29,7 @@ impl Session {
         let mut salt = [0u8; 32];
         OsRng.fill_bytes(&mut salt);
 
-        let mut session_key = Self::derive_session_key(&salt)?;
+        let mut session_key = Self::derive_session_key(&salt);
         let cipher = ChaCha20Poly1305::new(&session_key);
         session_key.as_mut_slice().zeroize();
 
@@ -82,12 +82,9 @@ impl Session {
         file.read_to_end(&mut contents)?;
         drop(file);
 
-        let session_data: SessionData = match bincode::deserialize(&contents) {
-            Ok(data) => data,
-            Err(_) => {
-                Self::clear_session()?;
-                return Ok(None);
-            }
+        let Ok(session_data) = bincode::deserialize::<SessionData>(&contents) else {
+            Self::clear_session()?;
+            return Ok(None);
         };
 
         if session_data.encrypted_password.is_empty() {
@@ -116,18 +113,15 @@ impl Session {
             return Err("Too many failed session validation attempts".into());
         }
 
-        let mut session_key = Self::derive_session_key(&session_data.salt)?;
+        let mut session_key = Self::derive_session_key(&session_data.salt);
         let cipher = ChaCha20Poly1305::new(&session_key);
         session_key.as_mut_slice().zeroize();
 
         let nonce = Nonce::from_slice(&session_data.nonce);
 
-        let decrypted = match cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) {
-            Ok(data) => data,
-            Err(_) => {
-                Self::clear_session()?;
-                return Ok(None);
-            }
+        let Ok(decrypted) = cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) else {
+            Self::clear_session()?;
+            return Ok(None);
         };
 
         let password = match String::from_utf8(decrypted) {
@@ -151,7 +145,7 @@ impl Session {
         let session_path = Self::get_session_path();
         if session_path.exists() {
             let metadata = fs::metadata(&session_path)?;
-            let file_size = metadata.len() as usize;
+            let file_size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
 
             if file_size > 0 && file_size < 1024 * 1024 {
                 let mut file = File::options().write(true).open(&session_path)?;
@@ -165,7 +159,7 @@ impl Session {
         Ok(())
     }
 
-    fn derive_session_key(salt: &[u8; 32]) -> Result<Key, Box<dyn std::error::Error>> {
+    fn derive_session_key(salt: &[u8; 32]) -> Key {
         let hardware_id = Crypto::get_hardware_id();
 
         let mut hasher = Hasher::new();
@@ -184,7 +178,7 @@ impl Session {
 
         let key = Key::from(derived);
         derived.zeroize();
-        Ok(key)
+        key
     }
 
     fn compute_machine_hash() -> [u8; 32] {

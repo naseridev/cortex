@@ -23,6 +23,22 @@ sysinfo = "0.30"
 zeroize = { version = "1.7", features = ["derive"] }
 regex = "1.11"
 
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+dbg_macro = "deny"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+
 [profile.release]
 opt-level = 3
 lto = true

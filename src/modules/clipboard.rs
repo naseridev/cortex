@@ -11,14 +11,15 @@ pub struct Clipboard;
 
 impl Clipboard {
     pub fn copy(text: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut ctx = ClipboardContext::new()
-            .map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+        let mut ctx =
+            ClipboardContext::new().map_err(|e| format!("Failed to initialize clipboard: {e}"))?;
         ctx.set_contents(text.to_owned())
-            .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+            .map_err(|e| format!("Failed to copy to clipboard: {e}"))?;
 
         Ok(())
     }
 
+    #[must_use]
     pub fn clear(seconds: u64, original_password: &str) -> bool {
         let mut password_copy = original_password.to_string();
         let cancelled = Arc::new(AtomicBool::new(false));

@@ -37,14 +37,17 @@ impl Drop for SecureString {
 }
 
 impl SecureString {
+    #[must_use]
     pub fn new(s: String) -> Self {
         Self(s)
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }

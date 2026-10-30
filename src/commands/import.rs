@@ -1,5 +1,9 @@
 use crate::{
-    core::types::{ExportData, SecureString},
+    core::{
+        crypto::Crypto,
+        storage::Storage,
+        types::{ExportData, ExportEntry, PasswordEntry, SecureString},
+    },
     modules::{gateway::Gateway, password::Password, tags::TagValidator},
 };
 use std::collections::HashSet;
@@ -10,21 +14,8 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Import;
 
 impl Import {
-    pub fn execute(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
-        if file_path.trim().is_empty() {
-            return Err("File path cannot be empty".into());
-        }
-
-        let path = Path::new(&file_path);
-
-        let file = File::open(path).map_err(|_| format!("File not found: {}", file_path))?;
-        let reader = BufReader::new(file);
-        let import_data: ExportData =
-            serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {}", e))?;
-
-        if import_data.entries.is_empty() {
-            return Err("No entries found in import file".into());
-        }
+    pub fn execute(file_path: &str, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
+        let import_data = Self::read_file(file_path)?;
 
         println!("\nImport Summary:");
         println!("  Version: {}", import_data.version);
@@ -33,12 +24,44 @@ impl Import {
         println!();
 
         let (storage, crypto) = Gateway::login()?;
+        let (validated_entries, validation_errors) = Self::validate_entries(import_data.entries);
 
+        if !validation_errors.is_empty() {
+            eprintln!("\nValidation errors:");
+            for error in &validation_errors {
+                eprintln!("  - {error}");
+            }
+        }
+
+        Self::apply_entries(&storage, &crypto, validated_entries, overwrite)
+    }
+
+    fn read_file(file_path: &str) -> Result<ExportData, Box<dyn std::error::Error>> {
+        if file_path.trim().is_empty() {
+            return Err("File path cannot be empty".into());
+        }
+
+        let file =
+            File::open(Path::new(file_path)).map_err(|_| format!("File not found: {file_path}"))?;
+        let reader = BufReader::new(file);
+        let import_data: ExportData =
+            serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {e}"))?;
+
+        if import_data.entries.is_empty() {
+            return Err("No entries found in import file".into());
+        }
+
+        Ok(import_data)
+    }
+
+    fn validate_entries(
+        entries: Vec<ExportEntry>,
+    ) -> (Vec<(ExportEntry, Vec<String>)>, Vec<String>) {
         let mut validated_entries = Vec::new();
         let mut validation_errors = Vec::new();
         let mut seen_names = HashSet::new();
 
-        for mut entry in import_data.entries {
+        for mut entry in entries {
             if entry.name.trim().is_empty() || entry.name.len() > 128 {
                 validation_errors.push("Entry with invalid or empty name".to_string());
                 entry.password.zeroize_string();
@@ -93,15 +116,17 @@ impl Import {
             validated_entries.push((entry, normalized_tags));
         }
 
-        if !validation_errors.is_empty() {
-            eprintln!("\nValidation errors:");
-            for error in &validation_errors {
-                eprintln!("  - {}", error);
-            }
-        }
+        (validated_entries, validation_errors)
+    }
 
+    fn apply_entries(
+        storage: &Storage,
+        crypto: &Crypto,
+        validated_entries: Vec<(ExportEntry, Vec<String>)>,
+        overwrite: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut imported_names = Vec::new();
-        let mut original_entries = Vec::new();
+        let mut original_entries: Vec<(String, PasswordEntry)> = Vec::new();
 
         let mut imported = 0;
         let mut skipped = 0;
@@ -160,8 +185,8 @@ impl Import {
                         }
                         Err(e) => {
                             eprintln!("Error importing '{}': {}", entry.name, e);
-                            Self::rollback_import(&storage, &imported_names, &original_entries)?;
-                            return Err(format!("Import failed, changes rolled back: {}", e).into());
+                            Self::rollback_import(storage, &imported_names, &original_entries)?;
+                            return Err(format!("Import failed, changes rolled back: {e}").into());
                         }
                     }
                 }
@@ -173,21 +198,21 @@ impl Import {
         }
 
         println!("\nImport completed:");
-        println!("  Imported: {}", imported);
+        println!("  Imported: {imported}");
         if skipped > 0 {
-            println!("  Skipped: {}", skipped);
+            println!("  Skipped: {skipped}");
         }
         if failed > 0 {
-            println!("  Failed: {}", failed);
+            println!("  Failed: {failed}");
         }
 
         Ok(())
     }
 
     fn rollback_import(
-        storage: &crate::core::storage::Storage,
+        storage: &Storage,
         imported_names: &[String],
-        original_entries: &[(String, crate::core::types::PasswordEntry)],
+        original_entries: &[(String, PasswordEntry)],
     ) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("\nRolling back changes...");
 

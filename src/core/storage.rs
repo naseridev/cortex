@@ -31,10 +31,10 @@ impl Storage {
                 }
                 Some(f)
             }
-            Err(e) => return Err(format!("Failed to create lock file: {}", e).into()),
+            Err(e) => return Err(format!("Failed to create lock file: {e}").into()),
         };
 
-        let db = sled::open(&db_path).map_err(|e| format!("Failed to open database: {}", e))?;
+        let db = sled::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
 
         #[cfg(unix)]
         {
@@ -62,11 +62,11 @@ impl Storage {
 
         self.db
             .apply_batch(batch)
-            .map_err(|e| format!("Failed to initialize database: {}", e))?;
+            .map_err(|e| format!("Failed to initialize database: {e}"))?;
 
         self.db
             .flush()
-            .map_err(|e| format!("Failed to flush database: {}", e))?;
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
 
         self.create_backup()?;
 
@@ -91,11 +91,11 @@ impl Storage {
 
         self.db
             .apply_batch(batch)
-            .map_err(|e| format!("Failed to apply atomic reset: {}", e))?;
+            .map_err(|e| format!("Failed to apply atomic reset: {e}"))?;
 
         self.db
             .flush()
-            .map_err(|e| format!("Failed to flush database: {}", e))?;
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
 
         Ok(())
     }
@@ -129,11 +129,11 @@ impl Storage {
 
         self.db
             .insert(name, bincode::serialize(entry)?)
-            .map_err(|e| format!("Failed to insert password: {}", e))?;
+            .map_err(|e| format!("Failed to insert password: {e}"))?;
 
         self.db
             .flush()
-            .map_err(|e| format!("Failed to flush database: {}", e))?;
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
 
         Ok(true)
     }
@@ -149,7 +149,7 @@ impl Storage {
         match self.db.get(name)? {
             Some(data) => {
                 let entry: PasswordEntry = bincode::deserialize(&data)
-                    .map_err(|e| format!("Failed to deserialize entry: {}", e))?;
+                    .map_err(|e| format!("Failed to deserialize entry: {e}"))?;
                 Ok(Some(entry))
             }
             None => Ok(None),
@@ -165,7 +165,7 @@ impl Storage {
 
             if !key_str.starts_with("__") {
                 let entry: PasswordEntry = bincode::deserialize(&value)
-                    .map_err(|e| format!("Failed to deserialize entry '{}': {}", key_str, e))?;
+                    .map_err(|e| format!("Failed to deserialize entry '{key_str}': {e}"))?;
                 entries.push((key_str, entry));
             }
         }
@@ -207,11 +207,11 @@ impl Storage {
 
         self.db
             .insert(name, bincode::serialize(entry)?)
-            .map_err(|e| format!("Failed to update password: {}", e))?;
+            .map_err(|e| format!("Failed to update password: {e}"))?;
 
         self.db
             .flush()
-            .map_err(|e| format!("Failed to flush database: {}", e))?;
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
 
         Ok(true)
     }
@@ -276,7 +276,7 @@ impl Storage {
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.db
             .insert(name, bincode::serialize(entry)?)
-            .map_err(|e| format!("Failed to update entry: {}", e))?;
+            .map_err(|e| format!("Failed to update entry: {e}"))?;
 
         Ok(())
     }
@@ -284,7 +284,7 @@ impl Storage {
     pub fn flush(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.db
             .flush()
-            .map_err(|e| format!("Failed to flush database: {}", e))?;
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
 
         Ok(())
     }
@@ -318,10 +318,7 @@ impl Storage {
         let mut failed = 0;
 
         for item in self.db.iter() {
-            let (key, value) = match item {
-                Ok((k, v)) => (k, v),
-                Err(_) => continue,
-            };
+            let Ok((key, value)) = item else { continue };
 
             let key_str = String::from_utf8_lossy(&key);
             if key_str.starts_with("__") {
@@ -332,14 +329,14 @@ impl Storage {
 
             if processed % 1000 == 0 {
                 writer.flush()?;
-                eprint!("\rProcessed {} entries...", processed);
+                eprint!("\rProcessed {processed} entries...");
                 std::io::stderr().flush()?;
             }
 
             match bincode::deserialize::<PasswordEntry>(&value) {
                 Ok(entry) => match process_entry(&key_str, &entry) {
                     Ok(output) => {
-                        writeln!(writer, "{}", output)?;
+                        writeln!(writer, "{output}")?;
                     }
                     Err(_) => failed += 1,
                 },
@@ -350,11 +347,11 @@ impl Storage {
         writer.flush()?;
 
         if processed >= 1000 {
-            eprintln!("\rCompleted {} entries.", processed);
+            eprintln!("\rCompleted {processed} entries.");
         }
 
         if failed > 0 {
-            eprintln!("Warning: {} entries failed to process", failed);
+            eprintln!("Warning: {failed} entries failed to process");
         }
 
         Ok((processed, failed))
@@ -376,7 +373,7 @@ impl Storage {
         }
 
         let timestamp = crate::core::time::Time::current_timestamp();
-        let backup_path = backup_dir.join(format!("backup_{}", timestamp));
+        let backup_path = backup_dir.join(format!("backup_{timestamp}"));
 
         self.db.flush()?;
 
@@ -424,13 +421,12 @@ impl Storage {
         keep: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut backups: Vec<_> = fs::read_dir(backup_dir)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| {
                 e.path()
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .map(|s| s.starts_with("backup_"))
-                    .unwrap_or(false)
+                    .is_some_and(|s| s.starts_with("backup_"))
             })
             .collect();
 
@@ -450,6 +446,7 @@ impl Storage {
         Ok(())
     }
 
+    #[must_use]
     pub fn get_db_path() -> PathBuf {
         let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("cortex");
@@ -466,6 +463,7 @@ impl Storage {
         path
     }
 
+    #[must_use]
     pub fn database_exists() -> bool {
         let db_path = Self::get_db_path();
         db_path.exists() && db_path.join("conf").exists()

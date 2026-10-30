@@ -29,18 +29,18 @@ impl Tag {
 
         println!("\nTags:");
         for (tag, count) in sorted_tags {
-            println!("  {} ({})", tag, count);
+            println!("  {tag} ({count})");
         }
 
         Ok(())
     }
 
-    pub fn add(name: String, tags: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn add(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.trim().is_empty() {
             return Err("Cannot modify system or empty entries".into());
         }
 
-        let normalized_tags = TagValidator::normalize(&tags);
+        let normalized_tags = TagValidator::normalize(tags);
         if normalized_tags.is_empty() {
             return Err("No valid tags provided".into());
         }
@@ -49,8 +49,8 @@ impl Tag {
         let (storage, crypto) = Gateway::login()?;
 
         let entry = storage
-            .get_password(&name)?
-            .ok_or_else(|| format!("Entry '{}' not found", name))?;
+            .get_password(name)?
+            .ok_or_else(|| format!("Entry '{name}' not found"))?;
 
         let mut existing_tags = crypto.decrypt_tags(&entry)?;
         let existing_set: HashSet<String> =
@@ -83,13 +83,13 @@ impl Tag {
             Some(&normalized_final),
         )?;
 
-        storage.edit_password(&name, &new_entry)?;
-        println!("Added {} tag(s) to '{}'", added_count, name);
+        storage.edit_password(name, &new_entry)?;
+        println!("Added {added_count} tag(s) to '{name}'");
 
         Ok(())
     }
 
-    pub fn remove(name: String, tags: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn remove(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.trim().is_empty() {
             return Err("Cannot modify system or empty entries".into());
         }
@@ -101,8 +101,8 @@ impl Tag {
         let (storage, crypto) = Gateway::login()?;
 
         let entry = storage
-            .get_password(&name)?
-            .ok_or_else(|| format!("Entry '{}' not found", name))?;
+            .get_password(name)?
+            .ok_or_else(|| format!("Entry '{name}' not found"))?;
 
         let mut existing_tags = crypto.decrypt_tags(&entry)?;
         let remove_set: HashSet<String> = tags.iter().map(|t| t.to_lowercase()).collect();
@@ -134,8 +134,8 @@ impl Tag {
             remaining_tags,
         )?;
 
-        storage.edit_password(&name, &new_entry)?;
-        println!("Removed {} tag(s) from '{}'", removed_count, name);
+        storage.edit_password(name, &new_entry)?;
+        println!("Removed {removed_count} tag(s) from '{name}'");
 
         Ok(())
     }

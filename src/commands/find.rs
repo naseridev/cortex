@@ -5,18 +5,18 @@ pub struct Find;
 
 impl Find {
     pub fn execute(
-        pattern: String,
+        pattern: &str,
         ignore_case: bool,
         names_only: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
-        let entries = storage.search_entries(&pattern)?;
-        let re = RegexBuilder::new(&pattern)
+        let entries = storage.search_entries(pattern)?;
+        let re = RegexBuilder::new(pattern)
             .case_insensitive(ignore_case)
             .size_limit(1024 * 1024)
             .build()
-            .map_err(|e| format!("Invalid search pattern: {}", e))?;
+            .map_err(|e| format!("Invalid search pattern: {e}"))?;
 
         let mut results = Vec::new();
 
@@ -31,17 +31,16 @@ impl Find {
                         let matched = re.is_match(&desc);
                         (Some(desc), matched)
                     }
-                    Ok(None) => (None, false),
-                    Err(_) => (None, false),
+                    Ok(None) | Err(_) => (None, false),
                 }
             };
 
             let entry_tags = crypto.decrypt_tags(&entry).unwrap_or_default();
 
-            let tag_match = if !names_only {
-                entry_tags.iter().any(|tag| re.is_match(tag))
-            } else {
+            let tag_match = if names_only {
                 false
+            } else {
+                entry_tags.iter().any(|tag| re.is_match(tag))
             };
 
             if name_match || desc_match || tag_match {
@@ -59,7 +58,7 @@ impl Find {
         results.sort_by(|a, b| a.0.cmp(&b.0));
 
         if results.is_empty() {
-            println!("No matches found for: {}", pattern);
+            println!("No matches found for: {pattern}");
             return Ok(());
         }
 
@@ -73,7 +72,7 @@ impl Find {
 
         for (name, description, tags, name_match, desc_match, tag_match) in results.iter().take(20)
         {
-            println!("Entry: {}", name);
+            println!("Entry: {name}");
 
             let mut matches = Vec::new();
             if *name_match {
@@ -94,11 +93,11 @@ impl Find {
                 let char_count = desc.chars().count();
                 let display_desc = if char_count > 60 {
                     let truncated: String = desc.chars().take(57).collect();
-                    format!("{}...", truncated)
+                    format!("{truncated}...")
                 } else {
                     desc.clone()
                 };
-                println!("  Description: {}", display_desc);
+                println!("  Description: {display_desc}");
             }
 
             if !tags.is_empty() {

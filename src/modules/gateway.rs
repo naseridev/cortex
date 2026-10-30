@@ -47,10 +47,9 @@ impl Gateway {
             } else if failure >= 2 {
                 Session::clear_session().ok();
                 return Err("Authentication failed".into());
-            } else {
-                eprintln!("Sorry, try again.\n");
-                failure += 1;
             }
+            eprintln!("Sorry, try again.\n");
+            failure += 1;
         }
     }
 

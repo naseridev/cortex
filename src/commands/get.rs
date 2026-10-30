@@ -7,12 +7,12 @@ pub struct Get;
 
 impl Get {
     pub fn execute(
-        name: String,
+        name: &str,
         clip: Option<Option<u64>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
-        match storage.get_password(&name)? {
+        match storage.get_password(name)? {
             Some(entry) => {
                 let decrypted = crypto.decrypt_entry(&entry)?;
                 let password = SecureString::new(String::from_utf8(decrypted)?);
@@ -28,10 +28,10 @@ impl Get {
 
                     Clipboard::copy(password.as_str())?;
 
-                    println!("\nPassword copied to clipboard for {} seconds...", seconds);
+                    println!("\nPassword copied to clipboard for {seconds} seconds...");
 
                     if let Some(desc) = description {
-                        println!("Description: {}", desc);
+                        println!("Description: {desc}");
                     }
                     if !tags.is_empty() {
                         println!("Tags: {}", tags.join(", "));
@@ -46,14 +46,14 @@ impl Get {
                     println!();
                     println!("{}: {}", name, password.as_str());
                     if let Some(desc) = description {
-                        println!("Description: {}", desc);
+                        println!("Description: {desc}");
                     }
                     if !tags.is_empty() {
                         println!("Tags: {}", tags.join(", "));
                     }
                 }
             }
-            None => return Err(format!("Not found: {}", name).into()),
+            None => return Err(format!("Not found: {name}").into()),
         }
 
         Ok(())

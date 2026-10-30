@@ -1,3 +1,4 @@
+use crate::core::storage::Storage;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -25,20 +26,16 @@ impl Default for Config {
 
 impl Config {
     pub fn load_from_db(db: &sled::Db) -> Result<Self, Box<dyn std::error::Error>> {
-        match db.get(CONFIG_KEY)? {
-            Some(data) => {
-                let config: Config =
-                    bincode::deserialize(&data).unwrap_or_else(|_| Self::default());
+        if let Some(data) = db.get(CONFIG_KEY)? {
+            let config: Config = bincode::deserialize(&data).unwrap_or_else(|_| Self::default());
 
-                Self::update_cache(config.clone())?;
-                Ok(config)
-            }
-            None => {
-                let default_config = Self::default();
-                default_config.save_to_db(db)?;
-                Self::update_cache(default_config.clone())?;
-                Ok(default_config)
-            }
+            Self::update_cache(config.clone())?;
+            Ok(config)
+        } else {
+            let default_config = Self::default();
+            default_config.save_to_db(db)?;
+            Self::update_cache(default_config.clone())?;
+            Ok(default_config)
         }
     }
 
@@ -54,8 +51,6 @@ impl Config {
         if let Some(cached) = Self::get_cached() {
             return Ok(cached);
         }
-
-        use crate::core::storage::Storage;
 
         if !Storage::database_exists() {
             return Ok(Self::default());

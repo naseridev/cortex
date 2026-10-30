@@ -23,9 +23,9 @@ impl List {
         } else {
             for (name, description, tags) in entries {
                 println!();
-                println!("Entry: {}", name);
+                println!("Entry: {name}");
                 if let Some(desc) = &description {
-                    println!("Description: {}", desc);
+                    println!("Description: {desc}");
                 }
                 if show_tags && !tags.is_empty() {
                     println!("Tags: {}", tags.join(", "));

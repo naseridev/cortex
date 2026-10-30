@@ -3,7 +3,7 @@ use crate::modules::{gateway::Gateway, validation::Validation};
 pub struct Delete;
 
 impl Delete {
-    pub fn execute(name: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.trim().is_empty() {
             return Err("Cannot delete system or empty entries".into());
         }
@@ -12,13 +12,13 @@ impl Delete {
 
         Validation::account_exists_probe(
             &storage,
-            &name,
+            name,
             true,
-            &format!("Account '{}' not found.", name),
+            &format!("Account '{name}' not found."),
         )?;
 
-        storage.delete_password(&name)?;
-        println!("Deleted '{}'.", name);
+        storage.delete_password(name)?;
+        println!("Deleted '{name}'.");
 
         Ok(())
     }

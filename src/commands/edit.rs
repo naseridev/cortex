@@ -9,7 +9,7 @@ const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 pub struct Edit;
 
 impl Edit {
-    pub fn execute(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(name: &str, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         if name.starts_with("__") || name.trim().is_empty() {
             return Err("Cannot edit system or empty entries".into());
         }
@@ -17,8 +17,8 @@ impl Edit {
         let (storage, crypto) = Gateway::login()?;
 
         let entry = storage
-            .get_password(&name)?
-            .ok_or_else(|| format!("Account '{}' not found.", name))?;
+            .get_password(name)?
+            .ok_or_else(|| format!("Account '{name}' not found."))?;
 
         let decrypted = crypto.decrypt_entry(&entry)?;
         let password_str = String::from_utf8(decrypted)?;
@@ -74,15 +74,15 @@ impl Edit {
             && tag_list.as_ref() == current_tags_opt;
 
         if no_changes {
-            println!("No changes made to '{}'.", name);
+            println!("No changes made to '{name}'.");
             return Ok(());
         }
 
         let updated_entry =
             crypto.create_entry(new_password.as_bytes(), description, tag_list.as_deref())?;
 
-        if storage.edit_password(&name, &updated_entry)? {
-            println!("Edited '{}'.", name);
+        if storage.edit_password(name, &updated_entry)? {
+            println!("Edited '{name}'.");
         }
 
         Ok(())

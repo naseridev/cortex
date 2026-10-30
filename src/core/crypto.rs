@@ -16,6 +16,7 @@ pub struct Crypto {
 }
 
 impl Crypto {
+    #[must_use]
     pub fn new(master_password: &SecureString, salt: &[u8]) -> Self {
         let mut key = Self::derive_key(master_password.as_bytes(), salt);
         let cipher = ChaCha20Poly1305::new(&key);
@@ -36,7 +37,7 @@ impl Crypto {
         let encrypted = self
             .cipher
             .encrypt(nonce, data)
-            .map_err(|e| format!("Encryption failed: {:?}", e))?;
+            .map_err(|e| format!("Encryption failed: {e:?}"))?;
 
         let (encrypted_description, desc_nonce) = if let Some(desc) = description {
             let mut desc_nonce_bytes = [0u8; 12];
@@ -46,7 +47,7 @@ impl Crypto {
             let encrypted_desc = self
                 .cipher
                 .encrypt(desc_nonce, desc.as_bytes())
-                .map_err(|e| format!("Description encryption failed: {:?}", e))?;
+                .map_err(|e| format!("Description encryption failed: {e:?}"))?;
 
             (Some(encrypted_desc), Some(desc_nonce_bytes))
         } else {
@@ -58,7 +59,7 @@ impl Crypto {
                 (None, None)
             } else {
                 let tags_json = serde_json::to_string(tag_list)
-                    .map_err(|e| format!("Tag serialization failed: {}", e))?;
+                    .map_err(|e| format!("Tag serialization failed: {e}"))?;
                 let mut tags_nonce_bytes = [0u8; 12];
                 OsRng.fill_bytes(&mut tags_nonce_bytes);
                 let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
@@ -66,7 +67,7 @@ impl Crypto {
                 let encrypted_tags = self
                     .cipher
                     .encrypt(tags_nonce, tags_json.as_bytes())
-                    .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
+                    .map_err(|e| format!("Tags encryption failed: {e:?}"))?;
 
                 (Some(encrypted_tags), Some(tags_nonce_bytes))
             }
@@ -92,7 +93,7 @@ impl Crypto {
         let nonce = Nonce::from_slice(&entry.nonce);
         self.cipher
             .decrypt(nonce, entry.encrypted_password.as_ref())
-            .map_err(|e| format!("Decryption failed: {:?}", e).into())
+            .map_err(|e| format!("Decryption failed: {e:?}").into())
     }
 
     pub fn decrypt_description(
@@ -106,10 +107,10 @@ impl Crypto {
             let decrypted = self
                 .cipher
                 .decrypt(nonce, encrypted_desc.as_ref())
-                .map_err(|e| format!("Description decryption failed: {:?}", e))?;
+                .map_err(|e| format!("Description decryption failed: {e:?}"))?;
 
             Ok(Some(String::from_utf8(decrypted).map_err(|e| {
-                format!("Invalid UTF-8 in description: {}", e)
+                format!("Invalid UTF-8 in description: {e}")
             })?))
         } else {
             Ok(None)
@@ -126,16 +127,17 @@ impl Crypto {
             let decrypted = self
                 .cipher
                 .decrypt(nonce, encrypted_tags.as_ref())
-                .map_err(|e| format!("Tags decryption failed: {:?}", e))?;
+                .map_err(|e| format!("Tags decryption failed: {e:?}"))?;
 
             let tags: Vec<String> = serde_json::from_slice(&decrypted)
-                .map_err(|e| format!("Tag deserialization failed: {}", e))?;
+                .map_err(|e| format!("Tag deserialization failed: {e}"))?;
             Ok(tags)
         } else {
             Ok(Vec::new())
         }
     }
 
+    #[must_use]
     pub fn verify_password(
         master_password: &SecureString,
         salt: &[u8],
@@ -159,6 +161,7 @@ impl Crypto {
         diff == 0
     }
 
+    #[must_use]
     pub fn create_verification_data(master_password: &SecureString, salt: &[u8]) -> Vec<u8> {
         let mut derived_key = Self::derive_key(master_password.as_bytes(), salt);
         let mut hasher = Hasher::new();
@@ -208,6 +211,7 @@ impl Crypto {
         })
     }
 
+    #[must_use]
     pub fn generate_salt() -> [u8; 32] {
         let mut salt = [0u8; 32];
         OsRng.fill_bytes(&mut salt);

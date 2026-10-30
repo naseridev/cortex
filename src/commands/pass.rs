@@ -1,4 +1,4 @@
-use crate::modules::password::Password;
+use crate::modules::password::{Password, PasswordCharset};
 
 pub struct Pass;
 
@@ -6,10 +6,7 @@ impl Pass {
     pub fn execute(
         length: usize,
         count: usize,
-        uppercase: bool,
-        lowercase: bool,
-        digits: bool,
-        special: bool,
+        charset: PasswordCharset,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if length < 4 {
             return Err("Password length must be at least 4 characters.".into());
@@ -24,11 +21,11 @@ impl Pass {
         }
 
         for i in 1..=count {
-            let password = Password::generate(length, uppercase, lowercase, digits, special)?;
+            let password = Password::generate(length, charset)?;
             if count > 1 {
-                println!("{}: {}", i, password);
+                println!("{i}: {password}");
             } else {
-                println!("{}", password);
+                println!("{password}");
             }
         }
 

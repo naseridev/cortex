@@ -29,6 +29,7 @@ impl TagValidator {
         Ok(())
     }
 
+    #[must_use]
     pub fn normalize(tags: &[String]) -> Vec<String> {
         let mut normalized: Vec<String> = tags
             .iter()
@@ -41,6 +42,7 @@ impl TagValidator {
         normalized
     }
 
+    #[must_use]
     pub fn parse_input(input: &str) -> Vec<String> {
         input
             .split(',')

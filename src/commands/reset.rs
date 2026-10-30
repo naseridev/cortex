@@ -1,5 +1,8 @@
 use crate::{
-    core::{crypto::Crypto, types::SecureString},
+    core::{
+        crypto::Crypto,
+        types::{SecureString, decode_secret_text},
+    },
     modules::{gateway::Gateway, password::Password, session::Session},
     ui::prompt::UserPrompt,
 };
@@ -30,16 +33,14 @@ impl Reset {
         let mut decrypted_entries = Vec::new();
 
         for (name, entry) in &entries {
-            let decrypted = crypto.decrypt_entry(entry)?;
-            let password_str = String::from_utf8(decrypted)?;
-            let password = SecureString::new(password_str);
-            let description = crypto.decrypt_description(entry)?;
-            let tags = crypto.decrypt_tags(entry)?;
+            let decrypted = crypto.decrypt_entry(name, entry)?;
+            let password = SecureString::new(decode_secret_text(decrypted)?);
+            let description = crypto.decrypt_description(name, entry)?;
+            let tags = crypto.decrypt_tags(name, entry)?;
             decrypted_entries.push((name.clone(), password, description, tags));
         }
 
-        let new_salt = Crypto::generate_salt();
-        let new_crypto = Crypto::new(&new_password, &new_salt);
+        let (new_crypto, new_salt) = Crypto::create(&new_password)?;
 
         let mut updated_entries = Vec::with_capacity(decrypted_entries.len());
         for (name, password, description, tags) in &decrypted_entries {
@@ -49,15 +50,17 @@ impl Reset {
                 Some(tags.as_slice())
             };
 
-            let new_entry =
-                new_crypto.create_entry(password.as_bytes(), description.as_deref(), tag_list)?;
+            let new_entry = new_crypto.create_entry(
+                name,
+                password.as_bytes(),
+                description.as_deref(),
+                tag_list,
+            )?;
             updated_entries.push((name.clone(), new_entry));
         }
 
-        let verification_data = Crypto::create_verification_data(&new_password, &new_salt);
-
-        storage.atomic_reset(&updated_entries, &verification_data, &new_salt)?;
-        Session::save_session(&new_password)?;
+        storage.atomic_reset(&updated_entries, &new_crypto.verification(), &new_salt)?;
+        Session::save_session(new_crypto.key())?;
 
         println!("Master password reset successfully.");
 

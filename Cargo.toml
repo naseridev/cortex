@@ -6,6 +6,7 @@ authors = ["Nima Naseri <nerdnull@proton.me>"]
 description = "A secure password manager with hardware-backed encryption"
 
 [dependencies]
+argon2 = "0.5"
 blake3 = "1.5"
 bincode = "1.3"
 chacha20poly1305 = "0.10"

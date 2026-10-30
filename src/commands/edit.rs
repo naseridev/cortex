@@ -1,5 +1,5 @@
 use crate::{
-    core::types::SecureString,
+    core::types::{SecureString, decode_secret_text},
     modules::{gateway::Gateway, password::Password, tags::TagValidator},
     ui::prompt::UserPrompt,
 };
@@ -20,11 +20,10 @@ impl Edit {
             .get_password(name)?
             .ok_or_else(|| format!("Account '{name}' not found."))?;
 
-        let decrypted = crypto.decrypt_entry(&entry)?;
-        let password_str = String::from_utf8(decrypted)?;
-        let current_password = SecureString::new(password_str);
-        let current_desc = crypto.decrypt_description(&entry)?;
-        let current_tags = crypto.decrypt_tags(&entry)?;
+        let decrypted = crypto.decrypt_entry(name, &entry)?;
+        let current_password = SecureString::new(decode_secret_text(decrypted)?);
+        let current_desc = crypto.decrypt_description(name, &entry)?;
+        let current_tags = crypto.decrypt_tags(name, &entry)?;
 
         let new_password_input =
             UserPrompt::optional_password("New password (Enter to keep current): ")?;
@@ -78,8 +77,12 @@ impl Edit {
             return Ok(());
         }
 
-        let updated_entry =
-            crypto.create_entry(new_password.as_bytes(), description, tag_list.as_deref())?;
+        let updated_entry = crypto.create_entry(
+            name,
+            new_password.as_bytes(),
+            description,
+            tag_list.as_deref(),
+        )?;
 
         if !storage.edit_password(name, &updated_entry)? {
             return Err(format!("Account '{name}' not found.").into());

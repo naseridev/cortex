@@ -52,3 +52,14 @@ impl SecureString {
         self.0.as_bytes()
     }
 }
+
+pub fn decode_secret_text(bytes: Vec<u8>) -> Result<String, Box<dyn std::error::Error>> {
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text),
+        Err(error) => {
+            let mut raw = error.into_bytes();
+            raw.zeroize();
+            Err("Stored secret is not valid UTF-8".into())
+        }
+    }
+}

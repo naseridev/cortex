@@ -1,6 +1,6 @@
-use crate::core::{config::Config, crypto::Crypto, time::Time, types::SecureString};
+use crate::core::{config::Config, crypto::Crypto, time::Time};
 use blake3::Hasher;
-use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce, aead::Aead};
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -17,15 +17,14 @@ struct SessionData {
     timestamp: u64,
     nonce: [u8; 12],
     salt: [u8; 32],
-    encrypted_password: Vec<u8>,
-    attempts: u32,
+    encrypted_key: Vec<u8>,
     machine_hash: [u8; 32],
 }
 
 pub struct Session;
 
 impl Session {
-    pub fn save_session(master_password: &SecureString) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save_session(vault_key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error>> {
         let mut salt = [0u8; 32];
         OsRng.fill_bytes(&mut salt);
 
@@ -38,39 +37,27 @@ impl Session {
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let encrypted = cipher
-            .encrypt(nonce, master_password.as_bytes())
+            .encrypt(nonce, vault_key.as_slice())
             .map_err(|_| "Session encryption failed")?;
 
-        let timestamp = Time::current_timestamp();
-        let machine_hash = Self::compute_machine_hash();
-
         let session_data = SessionData {
-            timestamp,
+            timestamp: Time::current_timestamp(),
             nonce: nonce_bytes,
             salt,
-            encrypted_password: encrypted,
-            attempts: 0,
-            machine_hash,
+            encrypted_key: encrypted,
+            machine_hash: Self::compute_machine_hash(),
         };
 
         let serialized = bincode::serialize(&session_data)?;
-
         let session_path = Self::get_session_path()?;
-        let mut file = File::create(&session_path)?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&session_path, fs::Permissions::from_mode(0o600))?;
-        }
-
+        let mut file = crate::platform::replace_private_file(&session_path)?;
         file.write_all(&serialized)?;
         file.sync_all()?;
 
         Ok(())
     }
 
-    pub fn load_session() -> Result<Option<SecureString>, Box<dyn std::error::Error>> {
+    pub fn load_session() -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
         let session_path = Self::get_session_path()?;
 
         if !session_path.exists() {
@@ -87,58 +74,41 @@ impl Session {
             return Ok(None);
         };
 
-        if session_data.encrypted_password.is_empty() {
-            Self::clear_session()?;
-            return Ok(None);
-        }
-
-        let current_machine_hash = Self::compute_machine_hash();
-        if session_data.machine_hash != current_machine_hash {
+        if session_data.encrypted_key.is_empty()
+            || session_data.machine_hash != Self::compute_machine_hash()
+        {
             Self::clear_session()?;
             return Ok(None);
         }
 
         let current_time = Time::current_timestamp();
         let config = Config::load()?;
-
         let elapsed = current_time.saturating_sub(session_data.timestamp);
-
         if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
             Self::clear_session()?;
             return Ok(None);
         }
 
-        if session_data.attempts >= 3 {
-            Self::clear_session()?;
-            return Err("Too many failed session validation attempts".into());
-        }
-
         let mut session_key = Self::derive_session_key(&session_data.salt);
         let cipher = ChaCha20Poly1305::new(&session_key);
         session_key.as_mut_slice().zeroize();
-
         let nonce = Nonce::from_slice(&session_data.nonce);
 
-        let Ok(decrypted) = cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) else {
+        let Ok(mut decrypted) = cipher.decrypt(nonce, session_data.encrypted_key.as_ref()) else {
             Self::clear_session()?;
             return Ok(None);
         };
 
-        let password = match String::from_utf8(decrypted) {
-            Ok(p) => p,
-            Err(e) => {
-                let mut bytes = e.into_bytes();
-                bytes.zeroize();
-                Self::clear_session()?;
-                return Ok(None);
-            }
-        };
+        if decrypted.len() != 32 {
+            decrypted.zeroize();
+            Self::clear_session()?;
+            return Ok(None);
+        }
 
-        let secure_password = SecureString::new(password);
-
-        Self::save_session(&secure_password)?;
-
-        Ok(Some(secure_password))
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&decrypted);
+        decrypted.zeroize();
+        Ok(Some(key))
     }
 
     pub fn clear_session() -> Result<(), Box<dyn std::error::Error>> {
@@ -159,7 +129,7 @@ impl Session {
         Ok(())
     }
 
-    fn derive_session_key(salt: &[u8; 32]) -> Key {
+    fn derive_session_key(salt: &[u8; 32]) -> chacha20poly1305::Key {
         let hardware_id = Crypto::get_hardware_id();
 
         let mut hasher = Hasher::new();
@@ -176,7 +146,7 @@ impl Session {
             derived = *hasher.finalize().as_bytes();
         }
 
-        let key = Key::from(derived);
+        let key = chacha20poly1305::Key::from(derived);
         derived.zeroize();
         key
     }
@@ -192,7 +162,7 @@ impl Session {
     }
 
     fn get_session_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let mut path = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
+        let mut path = dirs::cache_dir().ok_or("Could not determine the cache directory")?;
         path.push("cortex");
         fs::create_dir_all(&path)
             .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
@@ -212,7 +182,7 @@ impl Session {
 
 impl Drop for SessionData {
     fn drop(&mut self) {
-        self.encrypted_password.zeroize();
+        self.encrypted_key.zeroize();
         self.nonce.zeroize();
         self.salt.zeroize();
         self.machine_hash.zeroize();

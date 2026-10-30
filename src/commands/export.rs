@@ -91,7 +91,6 @@ impl Export {
             "cortex_export_{:x}.json",
             Time::current_timestamp()
         ));
-        Self::ensure_absent(&output)?;
 
         let mut collected = Self::collect_entries(&storage, &crypto)?;
         if collected.entries.is_empty() {
@@ -109,13 +108,6 @@ impl Export {
     fn print_plaintext_warning() {
         println!("\nThis will export ALL passwords in PLAIN TEXT format!");
         println!("Anyone with access to this file can read your passwords.");
-    }
-
-    fn ensure_absent(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        if path.exists() {
-            return Err(format!("File already exists: {}", path.display()).into());
-        }
-        Ok(())
     }
 
     fn collect_entries(
@@ -165,13 +157,13 @@ impl Export {
 
         let entry: PasswordEntry = bincode::deserialize(value)
             .map_err(|error| format!("Failed to deserialize entry '{name}': {error}"))?;
-        let password = Self::decrypt_password(crypto, &entry)
+        let password = Self::decrypt_password(crypto, &name, &entry)
             .map_err(|error| format!("Failed to decrypt entry '{name}': {error}"))?;
         let description = crypto
-            .decrypt_description(&entry)
+            .decrypt_description(&name, &entry)
             .map_err(|error| format!("Failed to decrypt description of '{name}': {error}"))?;
         let tags = crypto
-            .decrypt_tags(&entry)
+            .decrypt_tags(&name, &entry)
             .map_err(|error| format!("Failed to decrypt tags of '{name}': {error}"))?;
 
         Ok(Some(ExportEntry {
@@ -184,9 +176,10 @@ impl Export {
 
     fn decrypt_password(
         crypto: &Crypto,
+        name: &str,
         entry: &PasswordEntry,
     ) -> Result<SecureString, Box<dyn std::error::Error>> {
-        let bytes = crypto.decrypt_entry(entry)?;
+        let bytes = crypto.decrypt_entry(name, entry)?;
         match String::from_utf8(bytes) {
             Ok(password) => Ok(SecureString::new(password)),
             Err(error) => {
@@ -214,8 +207,15 @@ impl Export {
         })?;
         let mut temp = TempFile::new(temp_path);
         Self::write_json(file, entries)?;
-        fs::rename(&temp.path, output)?;
+        fs::hard_link(&temp.path, output).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                format!("File already exists: {}", output.display())
+            } else {
+                format!("Failed to publish export {}: {error}", output.display())
+            }
+        })?;
         temp.disarm();
+        fs::remove_file(&temp.path)?;
         Ok(())
     }
 
@@ -245,10 +245,14 @@ impl Export {
 
     fn export_template() -> Result<(), Box<dyn std::error::Error>> {
         let path = PathBuf::from(TEMPLATE_FILE_NAME);
-        Self::ensure_absent(&path)?;
-
         let entries = Self::template_entries();
-        let file = platform::create_private_file(&path)?;
+        let file = platform::create_private_file(&path).map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                format!("File already exists: {}", path.display())
+            } else {
+                error.to_string()
+            }
+        })?;
         Self::write_json(file, &entries)?;
 
         println!("Template exported to {}", path.display());

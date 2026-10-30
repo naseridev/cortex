@@ -1,5 +1,5 @@
 use crate::{
-    core::types::SecureString,
+    core::types::{SecureString, decode_secret_text},
     modules::{gateway::Gateway, tags::TagValidator},
 };
 use std::collections::{HashMap, HashSet};
@@ -13,7 +13,7 @@ impl Tag {
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
 
         for (name, entry) in storage.list_entries()? {
-            let tags = match crypto.decrypt_tags(&entry) {
+            let tags = match crypto.decrypt_tags(&name, &entry) {
                 Ok(tags) => tags,
                 Err(error) => {
                     eprintln!("Warning: skipping tags for '{name}': {error}");
@@ -58,7 +58,7 @@ impl Tag {
             .get_password(name)?
             .ok_or_else(|| format!("Entry '{name}' not found"))?;
 
-        let mut existing_tags = crypto.decrypt_tags(&entry)?;
+        let mut existing_tags = crypto.decrypt_tags(name, &entry)?;
         let existing_set: HashSet<String> =
             existing_tags.iter().map(|t| t.to_lowercase()).collect();
 
@@ -78,12 +78,12 @@ impl Tag {
         let normalized_final = TagValidator::normalize(&existing_tags);
         TagValidator::validate(&normalized_final)?;
 
-        let decrypted_bytes = crypto.decrypt_entry(&entry)?;
-        let password_str = String::from_utf8(decrypted_bytes)?;
-        let secure_password = SecureString::new(password_str);
-        let description = crypto.decrypt_description(&entry)?;
+        let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
+        let secure_password = SecureString::new(decode_secret_text(decrypted_bytes)?);
+        let description = crypto.decrypt_description(name, &entry)?;
 
         let new_entry = crypto.create_entry(
+            name,
             secure_password.as_bytes(),
             description.as_deref(),
             Some(&normalized_final),
@@ -112,7 +112,7 @@ impl Tag {
             .get_password(name)?
             .ok_or_else(|| format!("Entry '{name}' not found"))?;
 
-        let mut existing_tags = crypto.decrypt_tags(&entry)?;
+        let mut existing_tags = crypto.decrypt_tags(name, &entry)?;
         let remove_set: HashSet<String> = tags.iter().map(|t| t.to_lowercase()).collect();
 
         let original_count = existing_tags.len();
@@ -125,10 +125,9 @@ impl Tag {
             return Ok(());
         }
 
-        let decrypted_bytes = crypto.decrypt_entry(&entry)?;
-        let password_str = String::from_utf8(decrypted_bytes)?;
-        let secure_password = SecureString::new(password_str);
-        let description = crypto.decrypt_description(&entry)?;
+        let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
+        let secure_password = SecureString::new(decode_secret_text(decrypted_bytes)?);
+        let description = crypto.decrypt_description(name, &entry)?;
 
         let remaining_tags = if existing_tags.is_empty() {
             None
@@ -137,6 +136,7 @@ impl Tag {
         };
 
         let new_entry = crypto.create_entry(
+            name,
             secure_password.as_bytes(),
             description.as_deref(),
             remaining_tags,

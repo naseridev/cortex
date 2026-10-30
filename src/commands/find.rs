@@ -26,7 +26,7 @@ impl Find {
             let (description, desc_match) = if names_only {
                 (None, false)
             } else {
-                match crypto.decrypt_description(&entry) {
+                match crypto.decrypt_description(&name, &entry) {
                     Ok(Some(desc)) => {
                         let matched = re.is_match(&desc);
                         (Some(desc), matched)
@@ -39,7 +39,7 @@ impl Find {
                 }
             };
 
-            let entry_tags = match crypto.decrypt_tags(&entry) {
+            let entry_tags = match crypto.decrypt_tags(&name, &entry) {
                 Ok(tags) => tags,
                 Err(error) => {
                     eprintln!("Warning: skipping tags for '{name}': {error}");

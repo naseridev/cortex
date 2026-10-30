@@ -61,11 +61,11 @@ impl Storage {
     pub fn init_db(
         &self,
         verification_data: &[u8],
-        salt: &[u8; 32],
+        salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut batch = sled::Batch::default();
         batch.insert(INIT_MARKER, verification_data);
-        batch.insert(SALT_KEY, &salt[..]);
+        batch.insert(SALT_KEY, salt);
 
         self.db
             .apply_batch(batch)
@@ -84,7 +84,7 @@ impl Storage {
         &self,
         entries: &[(String, PasswordEntry)],
         verification_data: &[u8],
-        salt: &[u8; 32],
+        salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut batch = sled::Batch::default();
 
@@ -94,7 +94,7 @@ impl Storage {
         }
 
         batch.insert(INIT_MARKER, verification_data);
-        batch.insert(SALT_KEY, &salt[..]);
+        batch.insert(SALT_KEY, salt);
 
         self.db
             .apply_batch(batch)
@@ -395,45 +395,16 @@ impl Storage {
         let backup_path = backup_dir.join(format!("backup_{timestamp}"));
 
         self.db.flush()?;
-
-        if db_path.exists() {
-            Self::copy_dir_recursive(&db_path, &backup_path)?;
-        }
+        let snapshot = self.db.export();
+        let backup_db = sled::open(&backup_path)
+            .map_err(|error| format!("Failed to create backup database: {error}"))?;
+        backup_db.import(snapshot);
+        backup_db
+            .flush()
+            .map_err(|error| format!("Failed to flush backup database: {error}"))?;
+        drop(backup_db);
 
         Self::cleanup_old_backups(&backup_dir, 5)?;
-
-        Ok(())
-    }
-
-    fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        fs::create_dir_all(dst)
-            .map_err(|error| format!("Failed to create directory {}: {error}", dst.display()))?;
-        Self::restrict_directory(dst)?;
-
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let src_path = entry.path();
-            let dst_path = dst.join(entry.file_name());
-
-            if file_type.is_dir() {
-                Self::copy_dir_recursive(&src_path, &dst_path)?;
-            } else if file_type.is_file() {
-                fs::copy(&src_path, &dst_path)?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&dst_path, fs::Permissions::from_mode(0o600)).map_err(
-                        |error| {
-                            format!(
-                                "Failed to set permissions on {}: {error}",
-                                dst_path.display()
-                            )
-                        },
-                    )?;
-                }
-            }
-        }
 
         Ok(())
     }
@@ -469,7 +440,8 @@ impl Storage {
     }
 
     pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        let mut path =
+            dirs::config_dir().ok_or("Could not determine the configuration directory")?;
         path.push("cortex");
         fs::create_dir_all(&path)
             .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;

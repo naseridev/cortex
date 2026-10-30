@@ -47,7 +47,8 @@ impl Create {
             None
         };
 
-        let entry = crypto.create_entry(password.as_bytes(), description, tag_list.as_deref())?;
+        let entry =
+            crypto.create_entry(name, password.as_bytes(), description, tag_list.as_deref())?;
 
         if !storage.create_password(name, &entry)? {
             return Err(format!(

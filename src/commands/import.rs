@@ -133,7 +133,12 @@ impl Import {
         let mut failed = 0;
 
         for (mut entry, normalized_tags) in validated_entries {
-            let exists = storage.entry_exists(&entry.name)?;
+            let exists = match storage.entry_exists(&entry.name) {
+                Ok(exists) => exists,
+                Err(error) => {
+                    return Self::fail_import(storage, &imported_names, &original_entries, error);
+                }
+            };
 
             if exists && !overwrite {
                 eprintln!(
@@ -145,8 +150,26 @@ impl Import {
                 continue;
             }
 
-            if exists && let Ok(Some(original)) = storage.get_password(&entry.name) {
-                original_entries.push((entry.name.clone(), original));
+            if exists {
+                match storage.get_password(&entry.name) {
+                    Ok(Some(original)) => original_entries.push((entry.name.clone(), original)),
+                    Ok(None) => {
+                        return Self::fail_import(
+                            storage,
+                            &imported_names,
+                            &original_entries,
+                            format!("Entry '{}' disappeared before overwrite", entry.name),
+                        );
+                    }
+                    Err(error) => {
+                        return Self::fail_import(
+                            storage,
+                            &imported_names,
+                            &original_entries,
+                            error,
+                        );
+                    }
+                }
             }
 
             let tag_list = if normalized_tags.is_empty() {
@@ -158,6 +181,7 @@ impl Import {
             let secure_pass = SecureString::new(std::mem::take(&mut entry.password));
 
             match crypto.create_entry(
+                &entry.name,
                 secure_pass.as_bytes(),
                 entry.description.as_deref(),
                 tag_list,
@@ -183,10 +207,14 @@ impl Import {
                             eprintln!("Failed to import: {}", entry.name);
                             failed += 1;
                         }
-                        Err(e) => {
-                            eprintln!("Error importing '{}': {}", entry.name, e);
-                            Self::rollback_import(storage, &imported_names, &original_entries)?;
-                            return Err(format!("Import failed, changes rolled back: {e}").into());
+                        Err(error) => {
+                            eprintln!("Error importing '{}': {error}", entry.name);
+                            return Self::fail_import(
+                                storage,
+                                &imported_names,
+                                &original_entries,
+                                error,
+                            );
                         }
                     }
                 }
@@ -209,24 +237,53 @@ impl Import {
         Ok(())
     }
 
+    fn fail_import(
+        storage: &Storage,
+        imported_names: &[String],
+        original_entries: &[(String, PasswordEntry)],
+        error: impl std::fmt::Display,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Err(rollback_error) =
+            Self::rollback_import(storage, imported_names, original_entries)
+        {
+            return Err(
+                format!("Import failed: {error}. Rollback also failed: {rollback_error}").into(),
+            );
+        }
+        Err(format!("Import failed, changes rolled back: {error}").into())
+    }
+
     fn rollback_import(
         storage: &Storage,
         imported_names: &[String],
         original_entries: &[(String, PasswordEntry)],
     ) -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("\nRolling back changes...");
+        let mut rollback_error: Option<Box<dyn std::error::Error>> = None;
 
         for name in imported_names {
-            let _ = storage.delete_password(name);
+            if let Err(error) = storage.delete_password(name) {
+                eprintln!("Rollback failed to delete '{name}': {error}");
+                if rollback_error.is_none() {
+                    rollback_error = Some(error);
+                }
+            }
         }
 
         for (name, entry) in original_entries {
-            let _ = storage.edit_password(name, entry);
+            if let Err(error) = storage.edit_password(name, entry) {
+                eprintln!("Rollback failed to restore '{name}': {error}");
+                if rollback_error.is_none() {
+                    rollback_error = Some(error);
+                }
+            }
         }
 
         storage.flush()?;
+        if let Some(error) = rollback_error {
+            return Err(error);
+        }
         eprintln!("Rollback completed.");
-
         Ok(())
     }
 }

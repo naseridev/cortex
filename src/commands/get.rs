@@ -1,5 +1,5 @@
 use crate::{
-    core::types::SecureString,
+    core::types::{SecureString, decode_secret_text},
     modules::{clipboard::Clipboard, gateway::Gateway},
 };
 
@@ -14,10 +14,10 @@ impl Get {
 
         match storage.get_password(name)? {
             Some(entry) => {
-                let decrypted = crypto.decrypt_entry(&entry)?;
-                let password = SecureString::new(String::from_utf8(decrypted)?);
-                let description = crypto.decrypt_description(&entry)?;
-                let tags = crypto.decrypt_tags(&entry)?;
+                let decrypted = crypto.decrypt_entry(name, &entry)?;
+                let password = SecureString::new(decode_secret_text(decrypted)?);
+                let description = crypto.decrypt_description(name, &entry)?;
+                let tags = crypto.decrypt_tags(name, &entry)?;
 
                 if let Some(duration) = clip {
                     let seconds = duration.unwrap_or(43);

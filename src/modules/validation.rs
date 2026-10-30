@@ -1,5 +1,4 @@
 use crate::core::storage::Storage;
-use std::process;
 
 pub struct Validation;
 
@@ -11,8 +10,7 @@ impl Validation {
         let exists = Storage::database_exists();
 
         if exists != should_exist {
-            eprintln!("{}", error_message);
-            process::exit(1);
+            return Err(error_message.into());
         }
 
         Ok(())
@@ -24,11 +22,10 @@ impl Validation {
         should_exist: bool,
         error_message: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let exists = storage.db.get(name)?.is_some();
+        let exists = storage.entry_exists(name)?;
 
         if exists != should_exist {
-            eprintln!("{}", error_message);
-            process::exit(1);
+            return Err(error_message.into());
         }
 
         Ok(())

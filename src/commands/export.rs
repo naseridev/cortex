@@ -1,25 +1,12 @@
 use crate::{
-    core::{time::Time, types::PasswordEntry},
+    core::{
+        time::Time,
+        types::{ExportData, ExportEntry, PasswordEntry},
+    },
     modules::gateway::Gateway,
     utils::security::Security,
 };
-use serde::Serialize;
 use std::{fs::File, io::BufWriter, io::Write, path::PathBuf};
-
-#[derive(Serialize)]
-struct ExportData {
-    version: String,
-    timestamp: u64,
-    entries: Vec<ExportEntry>,
-}
-
-#[derive(Serialize)]
-struct ExportEntry {
-    name: String,
-    password: String,
-    description: Option<String>,
-    tags: Vec<String>,
-}
 
 pub struct Export;
 
@@ -57,8 +44,15 @@ impl Export {
         let mut processed = 0;
         let mut failed = 0;
 
-        for item in storage.db.iter().filter_map(Result::ok) {
-            let (key, value) = item;
+        for item in storage.db.iter() {
+            let (key, value) = match item {
+                Ok(kv) => kv,
+                Err(e) => {
+                    eprintln!("Database read error during export: {}", e);
+                    failed += 1;
+                    continue;
+                }
+            };
 
             let key_str = String::from_utf8_lossy(&key);
             if key_str.starts_with("__") {
@@ -98,6 +92,8 @@ impl Export {
             }
         }
 
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+
         let export_data = ExportData {
             version: "3.0.0".to_string(),
             timestamp: Time::current_timestamp(),
@@ -108,31 +104,31 @@ impl Export {
         writer.flush()?;
         drop(writer);
 
-        std::fs::rename(&temp_path, &output_path)?;
+        if processed > failed {
+            std::fs::rename(&temp_path, &output_path)?;
 
-        #[cfg(unix)]
-        {
-            use std::fs;
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&output_path, fs::Permissions::from_mode(0o600))?;
-        }
+            #[cfg(unix)]
+            {
+                use std::fs;
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&output_path, fs::Permissions::from_mode(0o600))?;
+            }
 
-        if failed > 0 {
-            eprintln!(
-                "\nExport completed with {} successful and {} failed entries",
-                processed - failed,
-                failed
-            );
-        } else {
-            eprintln!("\nExport completed successfully with {} entries", processed);
-        }
+            if failed > 0 {
+                eprintln!(
+                    "\nExport completed with {} successful and {} failed entries",
+                    processed - failed,
+                    failed
+                );
+            } else {
+                eprintln!("\nExport completed successfully with {} entries", processed);
+            }
 
-        if processed - failed > 0 {
             println!("\nExport saved to: {}", output_path.display());
             println!("\nREMEMBER: This file contains UNENCRYPTED passwords!");
             println!("Secure or delete it immediately after use.");
         } else {
-            std::fs::remove_file(&output_path)?;
+            let _ = std::fs::remove_file(&temp_path);
             println!("No entries were successfully exported.");
         }
 
@@ -143,7 +139,7 @@ impl Export {
         let filename = "cortex_template.json";
         let output_path = PathBuf::from(filename);
         let file = File::create(&output_path)?;
-        let writer = BufWriter::new(file);
+        let mut writer = BufWriter::new(file);
 
         let sample_entries = vec![
             ExportEntry {
@@ -174,7 +170,8 @@ impl Export {
             entries: sample_entries,
         };
 
-        serde_json::to_writer_pretty(writer, &template_data)?;
+        serde_json::to_writer_pretty(&mut writer, &template_data)?;
+        writer.flush()?;
         println!("Template exported to {}", output_path.display());
         println!("\nYou can use this template structure to import passwords.");
 

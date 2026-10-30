@@ -1,5 +1,4 @@
 use crate::modules::password::Password;
-use std::process;
 
 pub struct Pass;
 
@@ -13,39 +12,23 @@ impl Pass {
         special: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if length < 4 {
-            eprintln!("Error: Password length must be at least 4 characters.");
-            process::exit(1);
+            return Err("Password length must be at least 4 characters.".into());
         }
 
         if length > 128 {
-            eprintln!("Error: Password length too long (max 128 chars).");
-            process::exit(1);
+            return Err("Password length too long (max 128 chars).".into());
         }
 
         if !(1..=50).contains(&count) {
-            eprintln!("Error: Count must be between 1 and 50.");
-            process::exit(1);
-        }
-
-        let any_flag_set = uppercase || lowercase || digits || special;
-        if any_flag_set && !uppercase && !lowercase && !digits && !special {
-            eprintln!("Error: At least one character type must be enabled.");
-            process::exit(1);
+            return Err("Count must be between 1 and 50.".into());
         }
 
         for i in 1..=count {
-            match Password::generate(length, uppercase, lowercase, digits, special) {
-                Ok(password) => {
-                    if count > 1 {
-                        println!("{}: {}", i, password);
-                    } else {
-                        println!("{}", password);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error generating password: {}", e);
-                    process::exit(1);
-                }
+            let password = Password::generate(length, uppercase, lowercase, digits, special)?;
+            if count > 1 {
+                println!("{}: {}", i, password);
+            } else {
+                println!("{}", password);
             }
         }
 

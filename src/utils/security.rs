@@ -1,23 +1,20 @@
-use std::process;
-
-use rand::{RngCore, rngs::OsRng};
-
 use crate::ui::prompt::UserPrompt;
+use rand::{Rng, rngs::OsRng};
 
 pub struct Security;
 
 impl Security {
     pub fn generate_math_puzzle() -> (String, i64) {
         let mut rng = OsRng;
+        let ops = ["+", "-", "*"];
 
         loop {
-            let a = (rng.next_u32() % 91 + 10) as i64;
-            let b = (rng.next_u32() % 46 + 5) as i64;
-            let c = (rng.next_u32() % 38 + 3) as i64;
+            let a = rng.gen_range(10..=100);
+            let b = rng.gen_range(5..=50);
+            let c = rng.gen_range(3..=40);
 
-            let ops = ["+", "-", "*"];
-            let op1 = ops[(rng.next_u32() as usize) % ops.len()];
-            let op2 = ops[(rng.next_u32() as usize) % ops.len()];
+            let op1 = ops[rng.gen_range(0..ops.len())];
+            let op2 = ops[rng.gen_range(0..ops.len())];
 
             let intermediate = match op1 {
                 "+" => a + b,
@@ -55,8 +52,7 @@ impl Security {
         let user_num: i64 = user_answer.as_str().parse().map_err(|_| "Invalid number")?;
 
         if user_num != answer {
-            println!("Wrong answer. Destruction cancelled.");
-            process::exit(1);
+            return Err("Wrong answer. Operation cancelled.".into());
         }
 
         Ok(())

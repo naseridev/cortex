@@ -17,25 +17,30 @@ impl Get {
                 let decrypted = crypto.decrypt_entry(&entry)?;
                 let password = SecureString::new(String::from_utf8(decrypted)?);
                 let description = crypto.decrypt_description(&entry)?;
+                let tags = crypto.decrypt_tags(&entry)?;
 
                 if let Some(duration) = clip {
                     let seconds = duration.unwrap_or(43);
-                    Clipboard::copy(password.as_str())?;
 
                     if !(3..=540).contains(&seconds) {
-                        return Err("The time to be distracted is only allowed to be between 3 and 540 seconds".into());
+                        return Err("Clipboard timeout must be between 3 and 540 seconds".into());
                     }
+
+                    Clipboard::copy(password.as_str())?;
 
                     println!("\nPassword copied to clipboard for {} seconds...", seconds);
 
                     if let Some(desc) = description {
                         println!("Description: {}", desc);
                     }
+                    if !tags.is_empty() {
+                        println!("Tags: {}", tags.join(", "));
+                    }
 
                     if Clipboard::clear(seconds, password.as_str()) {
-                        println!("Done.");
+                        println!("Clipboard cleared.");
                     } else {
-                        return Err("The operation was not performed correctly".into());
+                        return Err("Failed to clear clipboard properly".into());
                     }
                 } else {
                     println!();
@@ -43,10 +48,13 @@ impl Get {
                     if let Some(desc) = description {
                         println!("Description: {}", desc);
                     }
+                    if !tags.is_empty() {
+                        println!("Tags: {}", tags.join(", "));
+                    }
                 }
             }
-            None => println!("Not found: {}", name),
-        };
+            None => return Err(format!("Not found: {}", name).into()),
+        }
 
         Ok(())
     }

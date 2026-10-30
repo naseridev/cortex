@@ -80,10 +80,10 @@ impl Config {
     }
 
     pub fn clear_cache() {
-        if let Some(cache) = CONFIG_CACHE.get() {
-            if let Ok(mut cached) = cache.lock() {
-                *cached = None;
-            }
+        if let Some(cache) = CONFIG_CACHE.get()
+            && let Ok(mut cached) = cache.lock()
+        {
+            *cached = None;
         }
     }
 }

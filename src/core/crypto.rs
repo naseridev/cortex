@@ -3,9 +3,13 @@ use crate::core::types::{PasswordEntry, SecureString};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce, aead::Aead};
 use rand::{RngCore, rngs::OsRng};
-use sysinfo::System;
+use std::sync::OnceLock;
+use sysinfo::{CpuRefreshKind, RefreshKind, System};
+use zeroize::Zeroize;
 
 const KDF_ITERATIONS: u32 = 600_000;
+
+static HARDWARE_ID_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
@@ -13,7 +17,9 @@ pub struct Crypto {
 
 impl Crypto {
     pub fn new(master_password: &SecureString, salt: &[u8]) -> Self {
-        let cipher = ChaCha20Poly1305::new(&Self::derive_key(master_password.as_bytes(), salt));
+        let mut key = Self::derive_key(master_password.as_bytes(), salt);
+        let cipher = ChaCha20Poly1305::new(&key);
+        key.as_mut_slice().zeroize();
         Self { cipher }
     }
 
@@ -48,18 +54,22 @@ impl Crypto {
         };
 
         let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
-            let tags_json = serde_json::to_string(tag_list)
-                .map_err(|e| format!("Tag serialization failed: {}", e))?;
-            let mut tags_nonce_bytes = [0u8; 12];
-            OsRng.fill_bytes(&mut tags_nonce_bytes);
-            let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
+            if tag_list.is_empty() {
+                (None, None)
+            } else {
+                let tags_json = serde_json::to_string(tag_list)
+                    .map_err(|e| format!("Tag serialization failed: {}", e))?;
+                let mut tags_nonce_bytes = [0u8; 12];
+                OsRng.fill_bytes(&mut tags_nonce_bytes);
+                let tags_nonce = Nonce::from_slice(&tags_nonce_bytes);
 
-            let encrypted_tags = self
-                .cipher
-                .encrypt(tags_nonce, tags_json.as_bytes())
-                .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
+                let encrypted_tags = self
+                    .cipher
+                    .encrypt(tags_nonce, tags_json.as_bytes())
+                    .map_err(|e| format!("Tags encryption failed: {:?}", e))?;
 
-            (Some(encrypted_tags), Some(tags_nonce_bytes))
+                (Some(encrypted_tags), Some(tags_nonce_bytes))
+            }
         } else {
             (None, None)
         };
@@ -131,18 +141,29 @@ impl Crypto {
         salt: &[u8],
         verification_data: &[u8],
     ) -> bool {
-        let derived_key = Self::derive_key(master_password.as_bytes(), salt);
+        let mut derived_key = Self::derive_key(master_password.as_bytes(), salt);
         let mut hasher = Hasher::new();
         hasher.update(derived_key.as_slice());
+        derived_key.as_mut_slice().zeroize();
         let computed_hash = hasher.finalize();
 
-        computed_hash.as_bytes() == verification_data
+        let a = computed_hash.as_bytes();
+        if a.len() != verification_data.len() {
+            return false;
+        }
+
+        let mut diff = 0u8;
+        for (x, y) in a.iter().zip(verification_data.iter()) {
+            diff |= x ^ y;
+        }
+        diff == 0
     }
 
     pub fn create_verification_data(master_password: &SecureString, salt: &[u8]) -> Vec<u8> {
-        let derived_key = Self::derive_key(master_password.as_bytes(), salt);
+        let mut derived_key = Self::derive_key(master_password.as_bytes(), salt);
         let mut hasher = Hasher::new();
         hasher.update(derived_key.as_slice());
+        derived_key.as_mut_slice().zeroize();
         hasher.finalize().as_bytes().to_vec()
     }
 
@@ -152,36 +173,39 @@ impl Crypto {
         let mut hasher = Hasher::new();
         hasher.update(password);
         hasher.update(salt);
-        hasher.update(&hardware_id);
+        hasher.update(hardware_id);
 
-        let mut derived = hasher.finalize().as_bytes().to_vec();
+        let mut derived = *hasher.finalize().as_bytes();
 
         for _ in 0..KDF_ITERATIONS {
             let mut hasher = Hasher::new();
             hasher.update(&derived);
             hasher.update(salt);
-            hasher.update(&hardware_id);
-            derived = hasher.finalize().as_bytes().to_vec();
+            hasher.update(hardware_id);
+            derived = *hasher.finalize().as_bytes();
         }
 
-        let key_bytes: [u8; 32] = derived[..32].try_into().expect("Hash size mismatch");
-        Key::from(key_bytes)
+        let key = Key::from(derived);
+        derived.zeroize();
+        key
     }
 
-    fn get_hardware_id() -> Vec<u8> {
-        let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
+    pub fn get_hardware_id() -> &'static [u8] {
+        HARDWARE_ID_CACHE.get_or_init(|| {
+            let mut hasher = Hasher::new();
+            let sys =
+                System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::new()));
 
-        if let Some(cpu) = sys.cpus().first() {
-            let brand = cpu.brand();
-            if !brand.is_empty() {
-                hasher.update(brand.as_bytes());
+            if let Some(cpu) = sys.cpus().first() {
+                let brand = cpu.brand();
+                if !brand.is_empty() {
+                    hasher.update(brand.as_bytes());
+                }
             }
-        }
 
-        hasher.update(b"cortex_hardware_binding");
-        hasher.finalize().as_bytes().to_vec()
+            hasher.update(b"cortex_hardware_binding");
+            hasher.finalize().as_bytes().to_vec()
+        })
     }
 
     pub fn generate_salt() -> [u8; 32] {

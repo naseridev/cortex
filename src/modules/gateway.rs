@@ -21,10 +21,10 @@ impl Gateway {
 
         if let Ok(Some(cached_password)) = Session::load_session() {
             let crypto = Crypto::new(&cached_password, &salt);
-            if let Ok(Some(verification_data)) = storage.get_verification_data() {
-                if Crypto::verify_password(&cached_password, &salt, &verification_data) {
-                    return Ok((storage, crypto));
-                }
+            if let Ok(Some(verification_data)) = storage.get_verification_data()
+                && Crypto::verify_password(&cached_password, &salt, &verification_data)
+            {
+                return Ok((storage, crypto));
             }
             Session::clear_session().ok();
         }

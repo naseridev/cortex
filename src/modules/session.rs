@@ -1,4 +1,4 @@
-use crate::core::{config::Config, time::Time, types::SecureString};
+use crate::core::{config::Config, crypto::Crypto, time::Time, types::SecureString};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, Nonce, aead::Aead};
 use rand::{RngCore, rngs::OsRng};
@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use sysinfo::System;
 use zeroize::Zeroize;
 
 const SESSION_FILE: &str = ".cortex_session";
@@ -30,8 +29,9 @@ impl Session {
         let mut salt = [0u8; 32];
         OsRng.fill_bytes(&mut salt);
 
-        let session_key = Self::derive_session_key(&salt)?;
+        let mut session_key = Self::derive_session_key(&salt)?;
         let cipher = ChaCha20Poly1305::new(&session_key);
+        session_key.as_mut_slice().zeroize();
 
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -57,14 +57,15 @@ impl Session {
 
         let session_path = Self::get_session_path();
         let mut file = File::create(&session_path)?;
-        file.write_all(&serialized)?;
-        file.sync_all()?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&session_path, fs::Permissions::from_mode(0o600))?;
         }
+
+        file.write_all(&serialized)?;
+        file.sync_all()?;
 
         Ok(())
     }
@@ -103,12 +104,9 @@ impl Session {
         let current_time = Time::current_timestamp();
         let config = Config::load()?;
 
-        if current_time - session_data.timestamp > config.session_timeout_seconds {
-            Self::clear_session()?;
-            return Ok(None);
-        }
+        let elapsed = current_time.saturating_sub(session_data.timestamp);
 
-        if current_time - session_data.timestamp > MAX_SESSION_AGE {
+        if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
             Self::clear_session()?;
             return Ok(None);
         }
@@ -118,11 +116,13 @@ impl Session {
             return Err("Too many failed session validation attempts".into());
         }
 
-        let session_key = Self::derive_session_key(&session_data.salt)?;
+        let mut session_key = Self::derive_session_key(&session_data.salt)?;
         let cipher = ChaCha20Poly1305::new(&session_key);
+        session_key.as_mut_slice().zeroize();
+
         let nonce = Nonce::from_slice(&session_data.nonce);
 
-        let mut decrypted = match cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) {
+        let decrypted = match cipher.decrypt(nonce, session_data.encrypted_password.as_ref()) {
             Ok(data) => data,
             Err(_) => {
                 Self::clear_session()?;
@@ -130,16 +130,15 @@ impl Session {
             }
         };
 
-        let password = match String::from_utf8(decrypted.clone()) {
+        let password = match String::from_utf8(decrypted) {
             Ok(p) => p,
-            Err(_) => {
-                decrypted.zeroize();
+            Err(e) => {
+                let mut bytes = e.into_bytes();
+                bytes.zeroize();
                 Self::clear_session()?;
                 return Ok(None);
             }
         };
-
-        decrypted.zeroize();
 
         let secure_password = SecureString::new(password);
 
@@ -167,53 +166,48 @@ impl Session {
     }
 
     fn derive_session_key(salt: &[u8; 32]) -> Result<Key, Box<dyn std::error::Error>> {
+        let hardware_id = Crypto::get_hardware_id();
+
         let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
-
-        if let Some(cpu) = sys.cpus().first() {
-            hasher.update(cpu.brand().as_bytes());
-        }
-
+        hasher.update(hardware_id);
         hasher.update(b"cortex_session_key_v3");
         hasher.update(salt);
 
-        let mut derived = hasher.finalize().as_bytes().to_vec();
+        let mut derived = *hasher.finalize().as_bytes();
 
         for _ in 0..SESSION_KDF_ITERATIONS {
             let mut hasher = Hasher::new();
             hasher.update(&derived);
             hasher.update(salt);
-            derived = hasher.finalize().as_bytes().to_vec();
+            derived = *hasher.finalize().as_bytes();
         }
 
-        let key_bytes: [u8; 32] = derived[..32]
-            .try_into()
-            .map_err(|_| "Key derivation failed")?;
-        Ok(Key::from(key_bytes))
+        let key = Key::from(derived);
+        derived.zeroize();
+        Ok(key)
     }
 
     fn compute_machine_hash() -> [u8; 32] {
+        let hardware_id = Crypto::get_hardware_id();
+
         let mut hasher = Hasher::new();
-        let mut sys = System::new_all();
-        sys.refresh_cpu();
-
-        if let Some(cpu) = sys.cpus().first() {
-            hasher.update(cpu.brand().as_bytes());
-        }
-
+        hasher.update(hardware_id);
         hasher.update(b"cortex_machine_binding_v1");
 
-        let hash = hasher.finalize();
-        let mut result = [0u8; 32];
-        result.copy_from_slice(&hash.as_bytes()[..32]);
-        result
+        *hasher.finalize().as_bytes()
     }
 
     fn get_session_path() -> PathBuf {
         let mut path = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("cortex");
         fs::create_dir_all(&path).ok();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o700));
+        }
+
         path.push(SESSION_FILE);
         path
     }

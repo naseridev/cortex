@@ -1,5 +1,4 @@
 use crate::{
-    core::types::SecureString,
     modules::{gateway::Gateway, password::Password, tags::TagValidator, validation::Validation},
     ui::prompt::UserPrompt,
 };
@@ -10,7 +9,7 @@ pub struct Create;
 
 impl Create {
     pub fn execute(name: String, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") || name.is_empty() {
+        if name.starts_with("__") || name.trim().is_empty() || name.len() > 128 {
             return Err("Invalid account name".into());
         }
 
@@ -23,17 +22,13 @@ impl Create {
             "Account already exists. Use 'edit' to update or choose a different name.",
         )?;
 
-        let password = UserPrompt::text("Password to store: ")?;
-        Password::length_check(&password, MIN_ACCOUNT_PASSWORD_LENGTH)?;
+        let password = UserPrompt::password("Password to store: ")?;
+        Password::length_check(password.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
-        let confirm_password = UserPrompt::text("Confirm password: ")?;
+        let confirm_password = UserPrompt::password("Confirm password: ")?;
         Password::match_check(password.as_str(), confirm_password.as_str())?;
 
-        let description_input = UserPrompt::text("Description (optional): ")?;
-
-        if description_input.len() > 500 {
-            return Err("Description too long (max 500 chars)".into());
-        }
+        let description_input = UserPrompt::text_with_limit("Description (optional): ", 500)?;
 
         Password::in_desc_check(password.as_str(), &description_input)?;
 
@@ -52,16 +47,14 @@ impl Create {
             None
         };
 
-        let secure_password = SecureString::new(password);
-        let entry =
-            crypto.create_entry(secure_password.as_bytes(), description, tag_list.as_deref())?;
+        let entry = crypto.create_entry(password.as_bytes(), description, tag_list.as_deref())?;
 
         if storage.create_password(&name, &entry)? {
             println!("Created '{}'.", name);
-            if let Some(tags) = tag_list {
-                if !tags.is_empty() {
-                    println!("Tags: {}", tags.join(", "));
-                }
+            if let Some(tags) = tag_list
+                && !tags.is_empty()
+            {
+                println!("Tags: {}", tags.join(", "));
             }
         }
 

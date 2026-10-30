@@ -4,8 +4,8 @@ pub struct Delete;
 
 impl Delete {
     pub fn execute(name: String) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
-            return Err("Cannot delete system entries".into());
+        if name.starts_with("__") || name.trim().is_empty() {
+            return Err("Cannot delete system or empty entries".into());
         }
 
         let storage = Gateway::login_storage_only()?;

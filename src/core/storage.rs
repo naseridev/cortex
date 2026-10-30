@@ -1,7 +1,7 @@
 use crate::core::types::PasswordEntry;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const INIT_MARKER: &str = "__init__";
 const SALT_KEY: &str = "__salt__";
@@ -42,6 +42,7 @@ impl Storage {
             if let Some(parent) = db_path.parent() {
                 let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
             }
+            let _ = fs::set_permissions(&db_path, fs::Permissions::from_mode(0o700));
         }
 
         Ok(Self {
@@ -55,19 +56,46 @@ impl Storage {
         verification_data: &[u8],
         salt: &[u8; 32],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.db
-            .insert(INIT_MARKER, verification_data)
-            .map_err(|e| format!("Failed to store verification data: {}", e))?;
+        let mut batch = sled::Batch::default();
+        batch.insert(INIT_MARKER, verification_data);
+        batch.insert(SALT_KEY, &salt[..]);
 
         self.db
-            .insert(SALT_KEY, &salt[..])
-            .map_err(|e| format!("Failed to store salt: {}", e))?;
+            .apply_batch(batch)
+            .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
         self.db
             .flush()
             .map_err(|e| format!("Failed to flush database: {}", e))?;
 
         self.create_backup()?;
+
+        Ok(())
+    }
+
+    pub fn atomic_reset(
+        &self,
+        entries: &[(String, PasswordEntry)],
+        verification_data: &[u8],
+        salt: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut batch = sled::Batch::default();
+
+        for (name, entry) in entries {
+            let serialized = bincode::serialize(entry)?;
+            batch.insert(name.as_bytes(), serialized);
+        }
+
+        batch.insert(INIT_MARKER, verification_data);
+        batch.insert(SALT_KEY, &salt[..]);
+
+        self.db
+            .apply_batch(batch)
+            .map_err(|e| format!("Failed to apply atomic reset: {}", e))?;
+
+        self.db
+            .flush()
+            .map_err(|e| format!("Failed to flush database: {}", e))?;
 
         Ok(())
     }
@@ -114,6 +142,10 @@ impl Storage {
         &self,
         name: &str,
     ) -> Result<Option<PasswordEntry>, Box<dyn std::error::Error>> {
+        if name.starts_with("__") {
+            return Ok(None);
+        }
+
         match self.db.get(name)? {
             Some(data) => {
                 let entry: PasswordEntry = bincode::deserialize(&data)
@@ -188,7 +220,7 @@ impl Storage {
         &self,
         pattern: &str,
     ) -> Result<Vec<(String, PasswordEntry)>, Box<dyn std::error::Error>> {
-        if pattern.is_empty() || pattern.trim().is_empty() {
+        if pattern.trim().is_empty() {
             return Err("Search pattern cannot be empty".into());
         }
 
@@ -208,7 +240,7 @@ impl Storage {
             }
 
             processed += 1;
-            if processed > 10000 {
+            if processed > 50_000 {
                 return Err("Too many entries to search".into());
             }
 
@@ -264,8 +296,12 @@ impl Storage {
         let db_path = Self::get_db_path();
         if db_path.exists() {
             if let Some(parent) = db_path.parent() {
-                std::fs::remove_dir_all(parent)?;
+                let backup_dir = parent.join("backups");
+                if backup_dir.exists() {
+                    let _ = fs::remove_dir_all(&backup_dir);
+                }
             }
+            let _ = fs::remove_dir_all(&db_path);
         }
 
         Ok(())
@@ -333,27 +369,19 @@ impl Storage {
 
         fs::create_dir_all(&backup_dir)?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&backup_dir, fs::Permissions::from_mode(0o700));
+        }
+
         let timestamp = crate::core::time::Time::current_timestamp();
-        let backup_path = backup_dir.join(format!("backup_{}.db", timestamp));
+        let backup_path = backup_dir.join(format!("backup_{}", timestamp));
 
         self.db.flush()?;
 
-        if let Some(parent) = db_path.parent() {
-            for entry in fs::read_dir(parent)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_file() {
-                    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                    if !file_name.starts_with('.') {
-                        let dest = backup_path
-                            .parent()
-                            .ok_or("Invalid backup path")?
-                            .join(file_name);
-                        fs::copy(&path, &dest)?;
-                    }
-                }
-            }
+        if db_path.exists() {
+            Self::copy_dir_recursive(&db_path, &backup_path)?;
         }
 
         Self::cleanup_old_backups(&backup_dir, 5)?;
@@ -361,20 +389,61 @@ impl Storage {
         Ok(())
     }
 
+    fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        fs::create_dir_all(dst)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(dst, fs::Permissions::from_mode(0o700));
+        }
+
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+
+            if file_type.is_dir() {
+                Self::copy_dir_recursive(&src_path, &dst_path)?;
+            } else if file_type.is_file() {
+                fs::copy(&src_path, &dst_path)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&dst_path, fs::Permissions::from_mode(0o600));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn cleanup_old_backups(
-        backup_dir: &PathBuf,
+        backup_dir: &Path,
         keep: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut backups: Vec<_> = fs::read_dir(backup_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_file())
+            .filter(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| s.starts_with("backup_"))
+                    .unwrap_or(false)
+            })
             .collect();
 
         backups.sort_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()));
 
         if backups.len() > keep {
             for backup in backups.iter().take(backups.len() - keep) {
-                fs::remove_file(backup.path())?;
+                let path = backup.path();
+                if path.is_dir() {
+                    fs::remove_dir_all(path)?;
+                } else {
+                    fs::remove_file(path)?;
+                }
             }
         }
 
@@ -398,7 +467,8 @@ impl Storage {
     }
 
     pub fn database_exists() -> bool {
-        Self::get_db_path().exists()
+        let db_path = Self::get_db_path();
+        db_path.exists() && db_path.join("conf").exists()
     }
 
     pub fn count_entries(&self) -> Result<usize, Box<dyn std::error::Error>> {
@@ -417,6 +487,9 @@ impl Storage {
     }
 
     pub fn entry_exists(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        if name.starts_with("__") {
+            return Ok(false);
+        }
         Ok(self.db.get(name)?.is_some())
     }
 }

@@ -1,4 +1,4 @@
-use rand::{RngCore, rngs::OsRng};
+use rand::{Rng, rngs::OsRng};
 
 pub struct Password;
 
@@ -10,7 +10,7 @@ impl Password {
         digits: bool,
         special: bool,
     ) -> Result<String, String> {
-        let mut charset = String::new();
+        let mut charset = Vec::new();
         let mut required_chars = Vec::new();
 
         let any_flag_set = uppercase || lowercase || digits || special;
@@ -21,27 +21,27 @@ impl Password {
         let use_special = if any_flag_set { special } else { true };
 
         if use_lowercase {
-            let lower = "abcdefghijklmnopqrstuvwxyz";
-            charset.push_str(lower);
-            required_chars.push(Self::pick_random_char(lower)?);
+            let lower: Vec<char> = "abcdefghijklmnopqrstuvwxyz".chars().collect();
+            required_chars.push(Self::pick_random_char(&lower)?);
+            charset.extend_from_slice(&lower);
         }
 
         if use_uppercase {
-            let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-            charset.push_str(upper);
-            required_chars.push(Self::pick_random_char(upper)?);
+            let upper: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect();
+            required_chars.push(Self::pick_random_char(&upper)?);
+            charset.extend_from_slice(&upper);
         }
 
         if use_digits {
-            let nums = "0123456789";
-            charset.push_str(nums);
-            required_chars.push(Self::pick_random_char(nums)?);
+            let nums: Vec<char> = "0123456789".chars().collect();
+            required_chars.push(Self::pick_random_char(&nums)?);
+            charset.extend_from_slice(&nums);
         }
 
         if use_special {
-            let specs = "!@#$%^&*()_+-=[]{}|;:,.<>?";
-            charset.push_str(specs);
-            required_chars.push(Self::pick_random_char(specs)?);
+            let specs: Vec<char> = "!@#$%^&*()_+-=[]{}|;:,.<>?".chars().collect();
+            required_chars.push(Self::pick_random_char(&specs)?);
+            charset.extend_from_slice(&specs);
         }
 
         if charset.is_empty() {
@@ -52,45 +52,38 @@ impl Password {
             return Err("Password length too short for required character types".to_string());
         }
 
-        let charset_chars: Vec<char> = charset.chars().collect();
-
-        let mut password = String::with_capacity(length);
         let mut rng = OsRng;
+        let mut password_chars = Vec::with_capacity(length);
 
         for &ch in &required_chars {
-            password.push(ch);
+            password_chars.push(ch);
         }
 
         for _ in required_chars.len()..length {
-            let idx = (rng.next_u32() as usize) % charset_chars.len();
-            password.push(charset_chars[idx]);
+            let idx = rng.gen_range(0..charset.len());
+            password_chars.push(charset[idx]);
         }
 
-        let mut password_chars: Vec<char> = password.chars().collect();
-
         for i in (1..password_chars.len()).rev() {
-            let j = (rng.next_u32() as usize) % (i + 1);
+            let j = rng.gen_range(0..=i);
             password_chars.swap(i, j);
         }
 
-        Ok(password_chars.iter().collect())
+        Ok(password_chars.into_iter().collect())
     }
 
-    fn pick_random_char(charset: &str) -> Result<char, String> {
-        let chars: Vec<char> = charset.chars().collect();
-
+    fn pick_random_char(chars: &[char]) -> Result<char, String> {
         if chars.is_empty() {
             return Err("Empty charset".to_string());
         }
 
         let mut rng = OsRng;
-        let idx = (rng.next_u32() as usize) % chars.len();
-
+        let idx = rng.gen_range(0..chars.len());
         Ok(chars[idx])
     }
 
     pub fn security_check(password: &str) -> Result<(), String> {
-        if password.len() < 8 {
+        if password.chars().count() < 8 {
             return Err("Password must be at least 8 characters long".to_string());
         }
 
@@ -115,7 +108,7 @@ impl Password {
             missing.push("special character");
         }
 
-        if missing.len() > 1 {
+        if !missing.is_empty() {
             return Err(format!(
                 "Your password needs improvement.\nMissing: {}",
                 missing.join(", ")
@@ -140,7 +133,7 @@ impl Password {
         password: &str,
         min_length: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if password.len() < min_length {
+        if password.chars().count() < min_length {
             return Err(format!("Password must be at least {} characters", min_length).into());
         }
 
@@ -148,38 +141,36 @@ impl Password {
     }
 
     fn in_desc_found(password: &str, description: &str) -> bool {
-        if password.len() < 3 || description.is_empty() {
-            return false;
-        }
-
         let password_lower = password.to_lowercase();
         let description_lower = description.to_lowercase();
+
+        let password_chars: Vec<char> = password_lower.chars().collect();
+        let description_chars: Vec<char> = description_lower.chars().collect();
+
+        if password_chars.len() < 3 || description_chars.is_empty() {
+            return false;
+        }
 
         if description_lower.contains(&password_lower) {
             return true;
         }
 
-        if description.len() < 3 {
+        if description_chars.len() < 3 {
             return false;
         }
 
-        let password_chars: Vec<char> = password_lower.chars().collect();
-        let description_chars: Vec<char> = description_lower.chars().collect();
+        let min_window = (password_chars.len() / 2).max(3);
 
-        let min_window = password.len().max(3) / 2;
-
-        for window_size in (min_window..=password.len()).rev() {
-            if window_size > description.len() {
+        for window_size in (min_window..=password_chars.len()).rev() {
+            if window_size > description_chars.len() {
                 continue;
             }
 
             for window in password_chars.windows(window_size) {
-                let pattern: String = window.iter().collect();
-
-                if description_chars.windows(window_size).any(|desc_window| {
-                    let desc_pattern: String = desc_window.iter().collect();
-                    desc_pattern == pattern
-                }) {
+                if description_chars
+                    .windows(window_size)
+                    .any(|desc_window| desc_window == window)
+                {
                     return true;
                 }
             }

@@ -1,5 +1,5 @@
 use crate::modules::gateway::Gateway;
-use regex::Regex;
+use regex::RegexBuilder;
 
 pub struct Find;
 
@@ -12,9 +12,11 @@ impl Find {
         let (storage, crypto) = Gateway::login()?;
 
         let entries = storage.search_entries(&pattern)?;
-        let regex_flags = if ignore_case { "(?i)" } else { "" };
-        let full_pattern = format!("{}{}", regex_flags, regex::escape(&pattern));
-        let re = Regex::new(&full_pattern).map_err(|e| format!("Invalid search pattern: {}", e))?;
+        let re = RegexBuilder::new(&pattern)
+            .case_insensitive(ignore_case)
+            .size_limit(1024 * 1024)
+            .build()
+            .map_err(|e| format!("Invalid search pattern: {}", e))?;
 
         let mut results = Vec::new();
 
@@ -23,17 +25,14 @@ impl Find {
 
             let (description, desc_match) = if names_only {
                 (None, false)
-            } else if name_match {
-                let desc = crypto.decrypt_description(&entry).unwrap_or(None);
-                (desc, false)
             } else {
                 match crypto.decrypt_description(&entry) {
                     Ok(Some(desc)) => {
-                        let desc_match = re.is_match(&desc);
-                        (Some(desc), desc_match)
+                        let matched = re.is_match(&desc);
+                        (Some(desc), matched)
                     }
                     Ok(None) => (None, false),
-                    Err(_) => continue,
+                    Err(_) => (None, false),
                 }
             };
 
@@ -92,8 +91,10 @@ impl Find {
             }
 
             if let Some(desc) = description {
-                let display_desc = if desc.len() > 60 {
-                    format!("{}...", &desc[..57])
+                let char_count = desc.chars().count();
+                let display_desc = if char_count > 60 {
+                    let truncated: String = desc.chars().take(57).collect();
+                    format!("{}...", truncated)
                 } else {
                     desc.clone()
                 };

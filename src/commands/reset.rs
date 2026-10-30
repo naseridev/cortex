@@ -1,6 +1,6 @@
 use crate::{
     core::{crypto::Crypto, types::SecureString},
-    modules::{gateway::Gateway, password::Password},
+    modules::{gateway::Gateway, password::Password, session::Session},
     ui::prompt::UserPrompt,
 };
 
@@ -14,23 +14,16 @@ impl Reset {
         storage.create_backup()?;
         println!("Backup created successfully.\n");
 
-        let salt = storage.get_salt()?.ok_or("Database salt not found")?;
-
         let new_password = loop {
             let password = UserPrompt::password("New master password: ")?;
 
             match Password::security_check(password.as_str()) {
-                Ok(_) => {
-                    break password;
-                }
-                Err(msg) => {
-                    eprintln!("Error: {}\n", msg);
-                }
+                Ok(_) => break password,
+                Err(msg) => eprintln!("Error: {}\n", msg),
             }
         };
 
         let confirm_password = UserPrompt::password("Confirm new password: ")?;
-
         Password::match_check(new_password.as_str(), confirm_password.as_str())?;
 
         let entries = storage.get_all_entries()?;
@@ -45,8 +38,10 @@ impl Reset {
             decrypted_entries.push((name.clone(), password, description, tags));
         }
 
-        let new_crypto = Crypto::new(&new_password, &salt);
+        let new_salt = Crypto::generate_salt();
+        let new_crypto = Crypto::new(&new_password, &new_salt);
 
+        let mut updated_entries = Vec::with_capacity(decrypted_entries.len());
         for (name, password, description, tags) in &decrypted_entries {
             let tag_list = if tags.is_empty() {
                 None
@@ -56,24 +51,13 @@ impl Reset {
 
             let new_entry =
                 new_crypto.create_entry(password.as_bytes(), description.as_deref(), tag_list)?;
-            storage.update_entry(name, &new_entry)?;
+            updated_entries.push((name.clone(), new_entry));
         }
 
-        let verification_data = Crypto::create_verification_data(&new_password, &salt);
-        storage.update_entry(
-            "__init__",
-            &crate::core::types::PasswordEntry {
-                encrypted_password: verification_data,
-                encrypted_description: None,
-                encrypted_tags: None,
-                nonce: [0u8; 12],
-                desc_nonce: None,
-                tags_nonce: None,
-                timestamp: crate::core::time::Time::current_timestamp(),
-            },
-        )?;
+        let verification_data = Crypto::create_verification_data(&new_password, &new_salt);
 
-        storage.flush()?;
+        storage.atomic_reset(&updated_entries, &verification_data, &new_salt)?;
+        let _ = Session::save_session(&new_password);
 
         println!("Master password reset successfully.");
 

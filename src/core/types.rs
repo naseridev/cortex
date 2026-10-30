@@ -13,6 +13,7 @@ pub struct ExportEntry {
     pub name: String,
     pub password: String,
     pub description: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 

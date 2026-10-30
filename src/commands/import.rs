@@ -1,33 +1,17 @@
 use crate::{
-    core::types::SecureString,
+    core::types::{ExportData, SecureString},
     modules::{gateway::Gateway, password::Password, tags::TagValidator},
 };
-use serde::Deserialize;
+use std::collections::HashSet;
 use std::{fs::File, io::BufReader, path::Path};
 
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
-
-#[derive(Deserialize)]
-struct ImportData {
-    version: String,
-    timestamp: u64,
-    entries: Vec<ImportEntry>,
-}
-
-#[derive(Deserialize)]
-struct ImportEntry {
-    name: String,
-    password: String,
-    description: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-}
 
 pub struct Import;
 
 impl Import {
     pub fn execute(file_path: String, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
-        if file_path.is_empty() {
+        if file_path.trim().is_empty() {
             return Err("File path cannot be empty".into());
         }
 
@@ -35,7 +19,7 @@ impl Import {
 
         let file = File::open(path).map_err(|_| format!("File not found: {}", file_path))?;
         let reader = BufReader::new(file);
-        let import_data: ImportData =
+        let import_data: ExportData =
             serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {}", e))?;
 
         if import_data.entries.is_empty() {
@@ -52,31 +36,49 @@ impl Import {
 
         let mut validated_entries = Vec::new();
         let mut validation_errors = Vec::new();
+        let mut seen_names = HashSet::new();
 
-        for entry in import_data.entries {
-            if entry.name.is_empty() {
-                validation_errors.push("Entry with empty name".to_string());
+        for mut entry in import_data.entries {
+            if entry.name.trim().is_empty() || entry.name.len() > 128 {
+                validation_errors.push("Entry with invalid or empty name".to_string());
+                entry.password.zeroize_string();
                 continue;
             }
 
             if entry.name.starts_with("__") {
                 validation_errors.push(format!("Reserved name: {}", entry.name));
+                entry.password.zeroize_string();
+                continue;
+            }
+
+            if !seen_names.insert(entry.name.clone()) {
+                validation_errors.push(format!("Duplicate entry in file: {}", entry.name));
+                entry.password.zeroize_string();
                 continue;
             }
 
             if let Err(e) = Password::length_check(&entry.password, MIN_ACCOUNT_PASSWORD_LENGTH) {
                 validation_errors.push(format!("{}: {}", entry.name, e));
+                entry.password.zeroize_string();
+                continue;
+            }
+
+            if entry.password.len() > 128 {
+                validation_errors.push(format!("{}: Password exceeds 128 chars", entry.name));
+                entry.password.zeroize_string();
                 continue;
             }
 
             if let Some(ref desc) = entry.description {
                 if desc.len() > 500 {
                     validation_errors.push(format!("{}: Description too long", entry.name));
+                    entry.password.zeroize_string();
                     continue;
                 }
 
                 if let Err(e) = Password::in_desc_check(&entry.password, desc) {
                     validation_errors.push(format!("{}: {}", entry.name, e));
+                    entry.password.zeroize_string();
                     continue;
                 }
             }
@@ -84,6 +86,7 @@ impl Import {
             let normalized_tags = TagValidator::normalize(&entry.tags);
             if let Err(e) = TagValidator::validate(&normalized_tags) {
                 validation_errors.push(format!("{}: {}", entry.name, e));
+                entry.password.zeroize_string();
                 continue;
             }
 
@@ -104,7 +107,7 @@ impl Import {
         let mut skipped = 0;
         let mut failed = 0;
 
-        for (entry, normalized_tags) in validated_entries {
+        for (mut entry, normalized_tags) in validated_entries {
             let exists = storage.entry_exists(&entry.name)?;
 
             if exists && !overwrite {
@@ -113,13 +116,12 @@ impl Import {
                     entry.name
                 );
                 skipped += 1;
+                entry.password.zeroize_string();
                 continue;
             }
 
-            if exists {
-                if let Ok(Some(original)) = storage.get_password(&entry.name) {
-                    original_entries.push((entry.name.clone(), original));
-                }
+            if exists && let Ok(Some(original)) = storage.get_password(&entry.name) {
+                original_entries.push((entry.name.clone(), original));
             }
 
             let tag_list = if normalized_tags.is_empty() {
@@ -128,8 +130,10 @@ impl Import {
                 Some(normalized_tags.as_slice())
             };
 
+            let secure_pass = SecureString::new(std::mem::take(&mut entry.password));
+
             match crypto.create_entry(
-                SecureString::new(entry.password.clone()).as_bytes(),
+                secure_pass.as_bytes(),
                 entry.description.as_deref(),
                 tag_list,
             ) {
@@ -199,5 +203,16 @@ impl Import {
         eprintln!("Rollback completed.");
 
         Ok(())
+    }
+}
+
+trait ZeroizeExt {
+    fn zeroize_string(&mut self);
+}
+
+impl ZeroizeExt for String {
+    fn zeroize_string(&mut self) {
+        use zeroize::Zeroize;
+        self.zeroize();
     }
 }

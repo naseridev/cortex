@@ -1,5 +1,8 @@
-use crate::modules::{gateway::Gateway, tags::TagValidator};
-use std::collections::HashMap;
+use crate::{
+    core::types::SecureString,
+    modules::{gateway::Gateway, tags::TagValidator},
+};
+use std::collections::{HashMap, HashSet};
 
 pub struct Tag;
 
@@ -33,11 +36,14 @@ impl Tag {
     }
 
     pub fn add(name: String, tags: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
-            return Err("Cannot modify system entries".into());
+        if name.starts_with("__") || name.trim().is_empty() {
+            return Err("Cannot modify system or empty entries".into());
         }
 
         let normalized_tags = TagValidator::normalize(&tags);
+        if normalized_tags.is_empty() {
+            return Err("No valid tags provided".into());
+        }
         TagValidator::validate(&normalized_tags)?;
 
         let (storage, crypto) = Gateway::login()?;
@@ -47,7 +53,7 @@ impl Tag {
             .ok_or_else(|| format!("Entry '{}' not found", name))?;
 
         let mut existing_tags = crypto.decrypt_tags(&entry)?;
-        let existing_set: std::collections::HashSet<String> =
+        let existing_set: HashSet<String> =
             existing_tags.iter().map(|t| t.to_lowercase()).collect();
 
         let mut added_count = 0;
@@ -66,11 +72,13 @@ impl Tag {
         let normalized_final = TagValidator::normalize(&existing_tags);
         TagValidator::validate(&normalized_final)?;
 
-        let password_data = crypto.decrypt_entry(&entry)?;
+        let decrypted_bytes = crypto.decrypt_entry(&entry)?;
+        let password_str = String::from_utf8(decrypted_bytes)?;
+        let secure_password = SecureString::new(password_str);
         let description = crypto.decrypt_description(&entry)?;
 
         let new_entry = crypto.create_entry(
-            &password_data,
+            secure_password.as_bytes(),
             description.as_deref(),
             Some(&normalized_final),
         )?;
@@ -82,8 +90,12 @@ impl Tag {
     }
 
     pub fn remove(name: String, tags: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
-            return Err("Cannot modify system entries".into());
+        if name.starts_with("__") || name.trim().is_empty() {
+            return Err("Cannot modify system or empty entries".into());
+        }
+
+        if tags.is_empty() {
+            return Err("No tags specified for removal".into());
         }
 
         let (storage, crypto) = Gateway::login()?;
@@ -93,8 +105,7 @@ impl Tag {
             .ok_or_else(|| format!("Entry '{}' not found", name))?;
 
         let mut existing_tags = crypto.decrypt_tags(&entry)?;
-        let remove_set: std::collections::HashSet<String> =
-            tags.iter().map(|t| t.to_lowercase()).collect();
+        let remove_set: HashSet<String> = tags.iter().map(|t| t.to_lowercase()).collect();
 
         let original_count = existing_tags.len();
         existing_tags.retain(|t| !remove_set.contains(&t.to_lowercase()));
@@ -106,11 +117,22 @@ impl Tag {
             return Ok(());
         }
 
-        let password_data = crypto.decrypt_entry(&entry)?;
+        let decrypted_bytes = crypto.decrypt_entry(&entry)?;
+        let password_str = String::from_utf8(decrypted_bytes)?;
+        let secure_password = SecureString::new(password_str);
         let description = crypto.decrypt_description(&entry)?;
 
-        let new_entry =
-            crypto.create_entry(&password_data, description.as_deref(), Some(&existing_tags))?;
+        let remaining_tags = if existing_tags.is_empty() {
+            None
+        } else {
+            Some(existing_tags.as_slice())
+        };
+
+        let new_entry = crypto.create_entry(
+            secure_password.as_bytes(),
+            description.as_deref(),
+            remaining_tags,
+        )?;
 
         storage.edit_password(&name, &new_entry)?;
         println!("Removed {} tag(s) from '{}'", removed_count, name);

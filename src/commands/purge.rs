@@ -1,4 +1,8 @@
-use crate::{modules::gateway::Gateway, utils::security::Security};
+use crate::{
+    core::config::Config,
+    modules::{gateway::Gateway, session::Session},
+    utils::security::Security,
+};
 
 pub struct Purge;
 
@@ -10,6 +14,9 @@ impl Purge {
         Security::confirmation(warning_message)?;
 
         storage.purge_database()?;
+        let _ = Session::clear_session();
+        Config::clear_cache();
+
         println!("Database purged.");
 
         Ok(())

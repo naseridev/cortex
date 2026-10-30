@@ -3,14 +3,18 @@ use crate::modules::gateway::Gateway;
 pub struct List;
 
 impl List {
-    pub fn execute(_: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute(show_tags: bool) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
 
         let mut entries = Vec::new();
 
         for (name, entry) in storage.list_entries()? {
             let description = crypto.decrypt_description(&entry)?;
-            let tags = crypto.decrypt_tags(&entry)?;
+            let tags = if show_tags {
+                crypto.decrypt_tags(&entry)?
+            } else {
+                Vec::new()
+            };
             entries.push((name, description, tags));
         }
 
@@ -23,7 +27,7 @@ impl List {
                 if let Some(desc) = &description {
                     println!("Description: {}", desc);
                 }
-                if !tags.is_empty() {
+                if show_tags && !tags.is_empty() {
                     println!("Tags: {}", tags.join(", "));
                 }
             }

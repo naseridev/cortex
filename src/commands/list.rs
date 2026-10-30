@@ -9,9 +9,21 @@ impl List {
         let mut entries = Vec::new();
 
         for (name, entry) in storage.list_entries()? {
-            let description = crypto.decrypt_description(&entry)?;
+            let description = match crypto.decrypt_description(&entry) {
+                Ok(description) => description,
+                Err(error) => {
+                    eprintln!("Warning: skipping entry '{name}': {error}");
+                    continue;
+                }
+            };
             let tags = if show_tags {
-                crypto.decrypt_tags(&entry)?
+                match crypto.decrypt_tags(&entry) {
+                    Ok(tags) => tags,
+                    Err(error) => {
+                        eprintln!("Warning: skipping entry '{name}': {error}");
+                        continue;
+                    }
+                }
             } else {
                 Vec::new()
             };

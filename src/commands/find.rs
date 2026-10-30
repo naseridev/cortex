@@ -31,11 +31,21 @@ impl Find {
                         let matched = re.is_match(&desc);
                         (Some(desc), matched)
                     }
-                    Ok(None) | Err(_) => (None, false),
+                    Ok(None) => (None, false),
+                    Err(error) => {
+                        eprintln!("Warning: skipping description for '{name}': {error}");
+                        (None, false)
+                    }
                 }
             };
 
-            let entry_tags = crypto.decrypt_tags(&entry).unwrap_or_default();
+            let entry_tags = match crypto.decrypt_tags(&entry) {
+                Ok(tags) => tags,
+                Err(error) => {
+                    eprintln!("Warning: skipping tags for '{name}': {error}");
+                    Vec::new()
+                }
+            };
 
             let tag_match = if names_only {
                 false

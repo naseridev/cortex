@@ -14,7 +14,7 @@ pub struct Storage {
 
 impl Storage {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let db_path = Self::get_db_path();
+        let db_path = Self::get_db_path()?;
 
         let lock_path = db_path
             .parent()
@@ -40,9 +40,16 @@ impl Storage {
         {
             use std::os::unix::fs::PermissionsExt;
             if let Some(parent) = db_path.parent() {
-                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(
+                    |error| format!("Failed to set permissions on {}: {error}", parent.display()),
+                )?;
             }
-            let _ = fs::set_permissions(&db_path, fs::Permissions::from_mode(0o700));
+            fs::set_permissions(&db_path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+                format!(
+                    "Failed to set permissions on {}: {error}",
+                    db_path.display()
+                )
+            })?;
         }
 
         Ok(Self {
@@ -233,7 +240,13 @@ impl Storage {
 
         for item in self.db.iter() {
             let (key, value) = item?;
-            let key_str = String::from_utf8_lossy(&key).to_string();
+            let key_str = match String::from_utf8(key.to_vec()) {
+                Ok(name) => name,
+                Err(error) => {
+                    eprintln!("Warning: skipping entry with an invalid name: {error}");
+                    continue;
+                }
+            };
 
             if key_str.starts_with("__") {
                 continue;
@@ -244,7 +257,13 @@ impl Storage {
                 return Err("Too many entries to search".into());
             }
 
-            let entry: PasswordEntry = bincode::deserialize(&value)?;
+            let entry = match bincode::deserialize::<PasswordEntry>(&value) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    eprintln!("Warning: skipping invalid entry '{key_str}': {error}");
+                    continue;
+                }
+            };
             results.push((key_str, entry));
         }
 
@@ -293,7 +312,7 @@ impl Storage {
         self.db.clear()?;
         self.db.flush()?;
 
-        let db_path = Self::get_db_path();
+        let db_path = Self::get_db_path()?;
         if db_path.exists() {
             if let Some(parent) = db_path.parent() {
                 let backup_dir = parent.join("backups");
@@ -358,19 +377,19 @@ impl Storage {
     }
 
     pub fn create_backup(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let db_path = Self::get_db_path();
+        let db_path = Self::get_db_path()?;
         let backup_dir = db_path
             .parent()
             .ok_or("Invalid database path")?
             .join("backups");
 
-        fs::create_dir_all(&backup_dir)?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&backup_dir, fs::Permissions::from_mode(0o700));
-        }
+        fs::create_dir_all(&backup_dir).map_err(|error| {
+            format!(
+                "Failed to create directory {}: {error}",
+                backup_dir.display()
+            )
+        })?;
+        Self::restrict_directory(&backup_dir)?;
 
         let timestamp = crate::core::time::Time::current_timestamp();
         let backup_path = backup_dir.join(format!("backup_{timestamp}"));
@@ -387,13 +406,9 @@ impl Storage {
     }
 
     fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        fs::create_dir_all(dst)?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(dst, fs::Permissions::from_mode(0o700));
-        }
+        fs::create_dir_all(dst)
+            .map_err(|error| format!("Failed to create directory {}: {error}", dst.display()))?;
+        Self::restrict_directory(dst)?;
 
         for entry in fs::read_dir(src)? {
             let entry = entry?;
@@ -408,7 +423,14 @@ impl Storage {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&dst_path, fs::Permissions::from_mode(0o600));
+                    fs::set_permissions(&dst_path, fs::Permissions::from_mode(0o600)).map_err(
+                        |error| {
+                            format!(
+                                "Failed to set permissions on {}: {error}",
+                                dst_path.display()
+                            )
+                        },
+                    )?;
                 }
             }
         }
@@ -446,27 +468,34 @@ impl Storage {
         Ok(())
     }
 
-    #[must_use]
-    pub fn get_db_path() -> PathBuf {
+    pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("cortex");
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
+        Self::restrict_directory(&path)?;
+        path.push(".password-store");
+        Ok(path)
+    }
 
-        std::fs::create_dir_all(&path).ok();
-
+    fn restrict_directory(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o700));
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+                format!("Failed to set permissions on {}: {error}", path.display())
+            })?;
         }
-
-        path.push(".password-store");
-        path
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+        }
+        Ok(())
     }
 
-    #[must_use]
-    pub fn database_exists() -> bool {
-        let db_path = Self::get_db_path();
-        db_path.exists() && db_path.join("conf").exists()
+    pub fn database_exists() -> Result<bool, Box<dyn std::error::Error>> {
+        let db_path = Self::get_db_path()?;
+        Ok(db_path.exists() && db_path.join("conf").exists())
     }
 
     pub fn count_entries(&self) -> Result<usize, Box<dyn std::error::Error>> {

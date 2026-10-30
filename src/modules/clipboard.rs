@@ -19,8 +19,10 @@ impl Clipboard {
         Ok(())
     }
 
-    #[must_use]
-    pub fn clear(seconds: u64, original_password: &str) -> bool {
+    pub fn clear(
+        seconds: u64,
+        original_password: &str,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut password_copy = original_password.to_string();
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancelled_clone = Arc::clone(&cancelled);
@@ -28,16 +30,17 @@ impl Clipboard {
         ctrlc::set_handler(move || {
             cancelled_clone.store(true, Ordering::SeqCst);
         })
-        .ok();
+        .map_err(|error| format!("Failed to install interrupt handler: {error}"))?;
 
         let total_ticks = seconds.saturating_mul(10);
         for _ in 0..total_ticks {
             if cancelled.load(Ordering::SeqCst) {
-                if let Ok(mut ctx) = ClipboardContext::new() {
-                    let _ = ctx.set_contents(String::new());
-                }
+                let mut ctx = ClipboardContext::new()
+                    .map_err(|error| format!("Failed to initialize clipboard: {error}"))?;
+                ctx.set_contents(String::new())
+                    .map_err(|error| format!("Failed to clear clipboard: {error}"))?;
                 password_copy.zeroize();
-                return true;
+                return Ok(true);
             }
             thread::sleep(Duration::from_millis(100));
         }
@@ -57,6 +60,6 @@ impl Clipboard {
         }
 
         password_copy.zeroize();
-        cleared
+        Ok(cleared)
     }
 }

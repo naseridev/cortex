@@ -49,13 +49,18 @@ impl Create {
 
         let entry = crypto.create_entry(password.as_bytes(), description, tag_list.as_deref())?;
 
-        if storage.create_password(name, &entry)? {
-            println!("Created '{name}'.");
-            if let Some(tags) = tag_list
-                && !tags.is_empty()
-            {
-                println!("Tags: {}", tags.join(", "));
-            }
+        if !storage.create_password(name, &entry)? {
+            return Err(format!(
+                "Account '{name}' already exists. Use 'edit' to update or choose a different name."
+            )
+            .into());
+        }
+
+        println!("Created '{name}'.");
+        if let Some(tags) = tag_list
+            && !tags.is_empty()
+        {
+            println!("Tags: {}", tags.join(", "));
         }
 
         Ok(())

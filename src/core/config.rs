@@ -27,7 +27,8 @@ impl Default for Config {
 impl Config {
     pub fn load_from_db(db: &sled::Db) -> Result<Self, Box<dyn std::error::Error>> {
         if let Some(data) = db.get(CONFIG_KEY)? {
-            let config: Config = bincode::deserialize(&data).unwrap_or_else(|_| Self::default());
+            let config: Config = bincode::deserialize(&data)
+                .map_err(|error| format!("Invalid configuration data: {error}"))?;
 
             Self::update_cache(config.clone())?;
             Ok(config)
@@ -52,7 +53,7 @@ impl Config {
             return Ok(cached);
         }
 
-        if !Storage::database_exists() {
+        if !Storage::database_exists()? {
             return Ok(Self::default());
         }
 

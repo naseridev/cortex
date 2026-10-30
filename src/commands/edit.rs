@@ -81,10 +81,11 @@ impl Edit {
         let updated_entry =
             crypto.create_entry(new_password.as_bytes(), description, tag_list.as_deref())?;
 
-        if storage.edit_password(name, &updated_entry)? {
-            println!("Edited '{name}'.");
+        if !storage.edit_password(name, &updated_entry)? {
+            return Err(format!("Account '{name}' not found.").into());
         }
 
+        println!("Edited '{name}'.");
         Ok(())
     }
 }

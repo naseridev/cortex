@@ -37,7 +37,7 @@ impl Get {
                         println!("Tags: {}", tags.join(", "));
                     }
 
-                    if Clipboard::clear(seconds, password.as_str()) {
+                    if Clipboard::clear(seconds, password.as_str())? {
                         println!("Clipboard cleared.");
                     } else {
                         return Err("Failed to clear clipboard properly".into());

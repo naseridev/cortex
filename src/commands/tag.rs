@@ -12,8 +12,14 @@ impl Tag {
 
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
 
-        for (_, entry) in storage.list_entries()? {
-            let tags = crypto.decrypt_tags(&entry)?;
+        for (name, entry) in storage.list_entries()? {
+            let tags = match crypto.decrypt_tags(&entry) {
+                Ok(tags) => tags,
+                Err(error) => {
+                    eprintln!("Warning: skipping tags for '{name}': {error}");
+                    continue;
+                }
+            };
             for tag in tags {
                 *tag_counts.entry(tag).or_insert(0) += 1;
             }
@@ -83,7 +89,9 @@ impl Tag {
             Some(&normalized_final),
         )?;
 
-        storage.edit_password(name, &new_entry)?;
+        if !storage.edit_password(name, &new_entry)? {
+            return Err(format!("Failed to update entry '{name}'").into());
+        }
         println!("Added {added_count} tag(s) to '{name}'");
 
         Ok(())
@@ -134,7 +142,9 @@ impl Tag {
             remaining_tags,
         )?;
 
-        storage.edit_password(name, &new_entry)?;
+        if !storage.edit_password(name, &new_entry)? {
+            return Err(format!("Failed to update entry '{name}'").into());
+        }
         println!("Removed {removed_count} tag(s) from '{name}'");
 
         Ok(())

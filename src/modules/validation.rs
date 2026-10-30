@@ -7,7 +7,7 @@ impl Validation {
         should_exist: bool,
         error_message: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let exists = Storage::database_exists();
+        let exists = Storage::database_exists()?;
 
         if exists != should_exist {
             return Err(error_message.into());

@@ -17,7 +17,9 @@ impl Delete {
             &format!("Account '{name}' not found."),
         )?;
 
-        storage.delete_password(name)?;
+        if !storage.delete_password(name)? {
+            return Err(format!("Account '{name}' not found.").into());
+        }
         println!("Deleted '{name}'.");
 
         Ok(())

@@ -14,7 +14,7 @@ impl Purge {
         Security::confirmation(warning_message)?;
 
         storage.purge_database()?;
-        let _ = Session::clear_session();
+        Session::clear_session()?;
         Config::clear_cache();
 
         println!("Database purged.");

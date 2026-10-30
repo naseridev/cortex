@@ -57,7 +57,7 @@ impl Reset {
         let verification_data = Crypto::create_verification_data(&new_password, &new_salt);
 
         storage.atomic_reset(&updated_entries, &verification_data, &new_salt)?;
-        let _ = Session::save_session(&new_password);
+        Session::save_session(&new_password)?;
 
         println!("Master password reset successfully.");
 

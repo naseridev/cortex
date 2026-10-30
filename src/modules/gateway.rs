@@ -19,14 +19,14 @@ impl Gateway {
             .get_salt()?
             .ok_or("Database salt not found. Database may be corrupted.")?;
 
-        if let Ok(Some(cached_password)) = Session::load_session() {
+        if let Some(cached_password) = Session::load_session()? {
             let crypto = Crypto::new(&cached_password, &salt);
-            if let Ok(Some(verification_data)) = storage.get_verification_data()
+            if let Some(verification_data) = storage.get_verification_data()?
                 && Crypto::verify_password(&cached_password, &salt, &verification_data)
             {
                 return Ok((storage, crypto));
             }
-            Session::clear_session().ok();
+            Session::clear_session()?;
         }
 
         let mut failure = 0;
@@ -42,10 +42,10 @@ impl Gateway {
             };
 
             if is_correct {
-                Session::save_session(&master_password).ok();
+                Session::save_session(&master_password)?;
                 return Ok((storage, crypto));
             } else if failure >= 2 {
-                Session::clear_session().ok();
+                Session::clear_session()?;
                 return Err("Authentication failed".into());
             }
             eprintln!("Sorry, try again.\n");

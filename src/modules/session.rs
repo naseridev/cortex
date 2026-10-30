@@ -55,7 +55,7 @@ impl Session {
 
         let serialized = bincode::serialize(&session_data)?;
 
-        let session_path = Self::get_session_path();
+        let session_path = Self::get_session_path()?;
         let mut file = File::create(&session_path)?;
 
         #[cfg(unix)]
@@ -71,7 +71,7 @@ impl Session {
     }
 
     pub fn load_session() -> Result<Option<SecureString>, Box<dyn std::error::Error>> {
-        let session_path = Self::get_session_path();
+        let session_path = Self::get_session_path()?;
 
         if !session_path.exists() {
             return Ok(None);
@@ -142,7 +142,7 @@ impl Session {
     }
 
     pub fn clear_session() -> Result<(), Box<dyn std::error::Error>> {
-        let session_path = Self::get_session_path();
+        let session_path = Self::get_session_path()?;
         if session_path.exists() {
             let metadata = fs::metadata(&session_path)?;
             let file_size = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
@@ -191,19 +191,22 @@ impl Session {
         *hasher.finalize().as_bytes()
     }
 
-    fn get_session_path() -> PathBuf {
+    fn get_session_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("cortex");
-        fs::create_dir_all(&path).ok();
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o700));
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+                format!("Failed to set permissions on {}: {error}", path.display())
+            })?;
         }
 
         path.push(SESSION_FILE);
-        path
+        Ok(path)
     }
 }
 

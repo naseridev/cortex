@@ -50,7 +50,7 @@ impl Session {
 
         let serialized = bincode::serialize(&session_data)?;
         let session_path = Self::get_session_path()?;
-        let mut file = crate::platform::replace_private_file(&session_path)?;
+        let mut file = crate::core::platform::replace_private_file(&session_path)?;
         file.write_all(&serialized)?;
         file.sync_all()?;
 

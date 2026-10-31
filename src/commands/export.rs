@@ -2,12 +2,12 @@ use crate::{
     core::{
         crypto::Crypto,
         limits::MAX_ENTRIES,
+        platform,
         storage::Storage,
         time::Time,
         types::{ExportEntry, PasswordEntry, SecureString},
     },
     modules::gateway::Gateway,
-    platform,
     utils::security::Security,
 };
 use serde::Serialize;

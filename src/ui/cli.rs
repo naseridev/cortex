@@ -30,13 +30,6 @@ pub enum Commands {
     Get {
         #[arg(help = "Name of the password entry to retrieve")]
         name: String,
-        #[arg(
-            short = 'c',
-            long = "clip",
-            help = "Copy password to clipboard for specified seconds (default: 43)",
-            value_name = "SECONDS"
-        )]
-        clip: Option<Option<u64>>,
     },
 
     #[command(about = "Edit password and description for existing entry")]

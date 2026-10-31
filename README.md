@@ -19,7 +19,6 @@ Cortex is a command-line password manager that uses ChaCha20-Poly1305 authentica
 - **Tag-Based Organization**: Organize passwords with multiple tags (up to 20 per entry)
 - **Advanced Search**: Search by name, description, or tags with regex and case-insensitive options
 - **Password Generation**: Secure password generator with customizable character sets
-- **Clipboard Integration**: Copy passwords to clipboard with automatic clearing (3-540 seconds)
 - **Description Support**: Optional descriptions (up to 500 characters) with security validation
 
 ### Data Management
@@ -83,7 +82,7 @@ cortex create "github-work" --tags "work,dev"
 
 Retrieve a password:
 ```bash
-cortex get "github-work" --clip
+cortex get "github-work"
 ```
 
 List all entries:
@@ -173,7 +172,6 @@ Database backups stored in: `[database_dir]/backups/`
 - **SecureString**: Automatic zeroing on drop
 - **SessionData**: Zeroize implementation for all sensitive fields
 - **Password Prompts**: Hidden input, no echo
-- **Clipboard**: Automatic clearing after timeout
 
 ## Dependencies
 
@@ -197,8 +195,6 @@ Database backups stored in: `[database_dir]/backups/`
 ### CLI
 - `clap` (4.5.x): Command-line parsing with derive macros
 - `rpassword` (7.3.x): Secure password input
-- `copypasta` (0.10.x): Clipboard management
-- `ctrlc` (3.4.x): Signal handling
 
 ### Utilities
 - `regex` (1.10.x): Pattern matching

@@ -79,34 +79,11 @@ cortex create "github-work" --tags "work,dev,critical"
 cortex get "github-work"
 ```
 
-**Copy to clipboard (default 43s):**
-```bash
-cortex get "github-work" --clip
-```
-
-**Copy to clipboard (custom timeout):**
-```bash
-cortex get "github-work" --clip 120
-```
-
 **Output:**
 ```
 github-work: your_secure_password_123
 Description: Work GitHub account for project X
 ```
-
-**Clipboard mode output:**
-```
-Password copied to clipboard for 120 seconds...
-Description: Work GitHub account for project X
-Done.
-```
-
-**Clipboard Options:**
-- Timeout range: 3-540 seconds
-- Default: 43 seconds
-- Auto-clear after timeout
-- Interrupt with Ctrl+C to clear immediately
 
 ### Listing Entries
 
@@ -464,10 +441,6 @@ cortex create "secure-app"
 cortex config set-timeout 30
 # Output: "Error: Session timeout must be at least 60 seconds (1 minute)"
 
-# Invalid clipboard timeout
-cortex get "account" --clip 600
-# Output: "Error: The time to be distracted is only allowed to be between 3 and 540 seconds"
-
 # Invalid tags
 cortex create "test" --tags "tag1,tag with space,tag3"
 # Output: "Error: Tags can only contain alphanumeric characters, hyphens, and underscores"
@@ -571,7 +544,6 @@ cortex import "invalid.json"
 - **Search Processing**: Max 10,000 entries
 - **Session Timeout**: 60 seconds to 24 hours
 - **Max Session Age**: 24 hours (hard limit)
-- **Clipboard Timeout**: 3-540 seconds
 - **Password Generation**: 4-128 characters, 1-50 count
 - **Import Batch**: Unlimited with validation
 
@@ -589,7 +561,7 @@ cortex import "invalid.json"
 |---------|---------|---------------|---------------|
 | `init` | Initialize database | None | None |
 | `create <name>` | Create entry | name | --tags \<tags\> |
-| `get <name>` | Retrieve entry | name | --clip [seconds] |
+| `get <name>` | Retrieve entry | name | None |
 | `list` | List all entries | None | --tags (deprecated) |
 | `delete <name>` | Delete entry | name | None |
 | `edit <name>` | Edit entry | name | --tags \<tags\> |
@@ -680,8 +652,6 @@ chmod 600 ~/.config/cortex/.password-store/*
 - Automate with scripts if needed
 
 ### Security
-- Use clipboard mode to avoid terminal history
-- Clear clipboard manually with Ctrl+C if needed
 - Don't share export files
 - Secure export files immediately (encrypt or delete)
 - Use `purge` to completely remove database

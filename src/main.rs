@@ -26,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::Init => Init::execute(),
         Commands::Create { name, tags } => Create::execute(&name, tags),
-        Commands::Get { name, clip } => Get::execute(&name, clip),
+        Commands::Get { name } => Get::execute(&name),
         Commands::List { show_tags } => List::execute(show_tags),
         Commands::Delete { name } => Delete::execute(&name),
         Commands::Edit { name, tags } => Edit::execute(&name, tags),

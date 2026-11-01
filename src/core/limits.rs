@@ -1,2 +1,10 @@
 pub const MAX_ENTRIES: usize = 50_000;
 pub const MAX_INPUT_LINE_BYTES: usize = 4_096;
+pub const MAX_PASSWORD_ATTEMPTS_PER_RUN: u32 = 3;
+pub const THROTTLE_FREE_FAILURES: u32 = 3;
+pub const THROTTLE_MAX_DELAY_SECONDS: u64 = 3_600;
+pub const MAX_EXPORT_FILE_BYTES: u64 = 128 * 1024 * 1024;
+pub const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
+pub const MAX_NAME_BYTES: usize = 128;
+pub const MAX_PASSWORD_BYTES: usize = 128;
+pub const MAX_DESCRIPTION_BYTES: usize = 500;

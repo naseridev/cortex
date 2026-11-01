@@ -1,34 +1,42 @@
 use crate::{
     core::{
         crypto::Crypto,
+        limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
-        types::{
-            EncryptedExport, ExportData, ExportEntry, ExportFile, PasswordEntry, SecureString,
-        },
+        types::{ExportEntry, PasswordEntry, SecureString},
     },
-    modules::{gateway::Gateway, password::Password, tags::TagValidator},
+    modules::{export_format, gateway::Gateway},
     ui::prompt::UserPrompt,
 };
-use std::collections::HashSet;
-use std::{fs::File, io::BufReader, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 use zeroize::Zeroize;
-
-const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 
 pub struct Import;
 
+struct ImportSource {
+    format: &'static str,
+    version: Option<String>,
+    timestamp: Option<u64>,
+    entries: Vec<ExportEntry>,
+}
+
 impl Import {
     pub fn execute(file_path: &str, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let import_data = Self::read_file(file_path)?;
+        let source = Self::read_file(file_path)?;
 
         println!("\nImport Summary:");
-        println!("  Version: {}", import_data.version);
-        println!("  Timestamp: {}", import_data.timestamp);
-        println!("  Total entries: {}", import_data.entries.len());
+        println!("  Format: {}", source.format);
+        if let Some(version) = &source.version {
+            println!("  Version: {version}");
+        }
+        if let Some(timestamp) = source.timestamp {
+            println!("  Timestamp: {timestamp}");
+        }
+        println!("  Total entries: {}", source.entries.len());
         println!();
 
         let (storage, crypto) = Gateway::login()?;
-        let (validated_entries, validation_errors) = Self::validate_entries(import_data.entries);
+        let (validated_entries, validation_errors) = Self::validate_entries(source.entries);
 
         if !validation_errors.is_empty() {
             eprintln!("\nValidation errors:");
@@ -40,40 +48,57 @@ impl Import {
         Self::apply_entries(&storage, &crypto, validated_entries, overwrite)
     }
 
-    fn read_file(file_path: &str) -> Result<ExportData, Box<dyn std::error::Error>> {
+    fn read_file(file_path: &str) -> Result<ImportSource, Box<dyn std::error::Error>> {
         if file_path.trim().is_empty() {
             return Err("File path cannot be empty".into());
         }
 
-        let file =
-            File::open(Path::new(file_path)).map_err(|_| format!("File not found: {file_path}"))?;
-        let reader = BufReader::new(file);
-        let export_file: ExportFile =
-            serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {e}"))?;
-        let import_data = match export_file {
-            ExportFile::Plain(data) => data,
-            ExportFile::Encrypted(encrypted) => Self::decrypt_export(&encrypted)?,
-        };
-
-        if import_data.entries.is_empty() {
-            return Err("No entries found in import file".into());
+        let path = Path::new(file_path);
+        let size = fs::metadata(path)
+            .map_err(|_| format!("File not found: {file_path}"))?
+            .len();
+        if size > MAX_EXPORT_FILE_BYTES {
+            return Err("Import file is too large".into());
         }
 
-        Ok(import_data)
+        let mut bytes =
+            fs::read(path).map_err(|error| format!("Failed to read {file_path}: {error}"))?;
+        let parsed = Self::parse_import(&bytes);
+        bytes.zeroize();
+        let source = parsed?;
+
+        if source.entries.is_empty() {
+            return Err("No entries found in import file".into());
+        }
+        if source.entries.len() > MAX_ENTRIES {
+            return Err(format!("Too many entries to import (limit is {MAX_ENTRIES})").into());
+        }
+        Ok(source)
     }
 
-    fn decrypt_export(
-        encrypted: &EncryptedExport,
-    ) -> Result<ExportData, Box<dyn std::error::Error>> {
-        let passphrase = UserPrompt::password("Export passphrase: ")?;
-        let crypto = Crypto::open(&passphrase, &encrypted.salt)?;
-        let mut plaintext = crypto
-            .open_blob(&encrypted.nonce, &encrypted.ciphertext)
-            .map_err(|_| "Wrong export passphrase or damaged export file")?;
-        let parsed = serde_json::from_slice::<ExportData>(&plaintext)
-            .map_err(|e| format!("Invalid export payload: {e}"));
-        plaintext.zeroize();
-        Ok(parsed?)
+    fn parse_import(bytes: &[u8]) -> Result<ImportSource, Box<dyn std::error::Error>> {
+        match std::str::from_utf8(bytes) {
+            Ok(text) if export_format::is_csv(text) || !text.trim_start().starts_with('{') => {
+                let entries = export_format::decode_csv(text)?;
+                Ok(ImportSource {
+                    format: "plaintext CSV",
+                    version: None,
+                    timestamp: None,
+                    entries,
+                })
+            }
+            _ => {
+                let file = export_format::parse_encrypted(bytes)?;
+                let passphrase = UserPrompt::password("Export passphrase: ")?;
+                let data = export_format::open_encrypted(&passphrase, &file)?;
+                Ok(ImportSource {
+                    format: "encrypted export",
+                    version: Some(data.version),
+                    timestamp: Some(data.timestamp),
+                    entries: data.entries,
+                })
+            }
+        }
     }
 
     fn validate_entries(
@@ -84,58 +109,22 @@ impl Import {
         let mut seen_names = HashSet::new();
 
         for mut entry in entries {
-            if entry.name.trim().is_empty() || entry.name.len() > 128 {
-                validation_errors.push("Entry with invalid or empty name".to_string());
-                entry.password.zeroize_string();
-                continue;
-            }
-
-            if entry.name.starts_with("__") {
-                validation_errors.push(format!("Reserved name: {}", entry.name));
-                entry.password.zeroize_string();
-                continue;
-            }
-
             if !seen_names.insert(entry.name.clone()) {
                 validation_errors.push(format!("Duplicate entry in file: {}", entry.name));
                 entry.password.zeroize_string();
                 continue;
             }
 
-            if let Err(e) = Password::length_check(&entry.password, MIN_ACCOUNT_PASSWORD_LENGTH) {
-                validation_errors.push(format!("{}: {}", entry.name, e));
-                entry.password.zeroize_string();
-                continue;
-            }
-
-            if entry.password.len() > 128 {
-                validation_errors.push(format!("{}: Password exceeds 128 chars", entry.name));
-                entry.password.zeroize_string();
-                continue;
-            }
-
-            if let Some(ref desc) = entry.description {
-                if desc.len() > 500 {
-                    validation_errors.push(format!("{}: Description too long", entry.name));
-                    entry.password.zeroize_string();
-                    continue;
+            match export_format::normalize_and_validate(&mut entry) {
+                Ok(()) => {
+                    let tags = entry.tags.clone();
+                    validated_entries.push((entry, tags));
                 }
-
-                if let Err(e) = Password::in_desc_check(&entry.password, desc) {
-                    validation_errors.push(format!("{}: {}", entry.name, e));
+                Err(message) => {
+                    validation_errors.push(format!("{}: {message}", entry.name));
                     entry.password.zeroize_string();
-                    continue;
                 }
             }
-
-            let normalized_tags = TagValidator::normalize(&entry.tags);
-            if let Err(e) = TagValidator::validate(&normalized_tags) {
-                validation_errors.push(format!("{}: {}", entry.name, e));
-                entry.password.zeroize_string();
-                continue;
-            }
-
-            validated_entries.push((entry, normalized_tags));
         }
 
         (validated_entries, validation_errors)

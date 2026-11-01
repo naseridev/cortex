@@ -66,15 +66,7 @@ pub fn decode_secret_text(bytes: Vec<u8>) -> Result<String, Box<dyn std::error::
 #[derive(Serialize, Deserialize)]
 pub struct EncryptedExport {
     pub version: String,
-    pub timestamp: u64,
     pub salt: Vec<u8>,
     pub nonce: [u8; 12],
     pub ciphertext: Vec<u8>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-pub enum ExportFile {
-    Encrypted(EncryptedExport),
-    Plain(ExportData),
 }

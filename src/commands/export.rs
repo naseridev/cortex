@@ -5,12 +5,13 @@ use crate::{
         platform,
         storage::Storage,
         time::Time,
-        types::{EncryptedExport, ExportEntry, PasswordEntry, SecureString},
+        types::{ExportEntry, PasswordEntry, SecureString},
     },
-    modules::{gateway::Gateway, password::Password},
+    modules::{export_format, gateway::Gateway, password::Password},
     ui::prompt::UserPrompt,
+    utils::security::Security,
 };
-use serde::Serialize;
+use rand::{RngCore, rngs::OsRng};
 use std::{
     fs::{self, File},
     io::{self, BufWriter, Write},
@@ -18,22 +19,12 @@ use std::{
 };
 use zeroize::Zeroize;
 
-const EXPORT_FORMAT_VERSION: &str = "4.0.0";
-const TEMPLATE_FILE_NAME: &str = "cortex_template.json";
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
 
 pub struct Export;
 
-#[derive(Serialize)]
-struct ExportDocument<'a> {
-    version: &'static str,
-    timestamp: u64,
-    entries: &'a [ExportEntry],
-}
-
 struct Collected {
     entries: Vec<ExportEntry>,
-    failed: usize,
 }
 
 impl Drop for Collected {
@@ -76,31 +67,57 @@ impl Drop for TempFile {
 }
 
 impl Export {
-    pub fn execute(template: bool) -> Result<(), Box<dyn std::error::Error>> {
-        if template {
-            return Self::export_template();
-        }
-
+    pub fn execute(csv: bool) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
+        if csv {
+            Security::confirmation(
+                "This export writes every password in plain text to a CSV file.",
+            )?;
+        }
 
         let mut collected = Self::collect_entries(&storage, &crypto)?;
         if collected.entries.is_empty() {
-            println!("No entries were successfully exported.");
+            println!("No entries to export.");
             return Ok(());
         }
-
-        let passphrase = Self::prompt_export_passphrase()?;
         collected.entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let output = PathBuf::from(format!(
-            "cortex_export_{:x}.json",
-            Time::current_timestamp()
-        ));
-        let bytes =
-            Self::encrypt_document(&passphrase, &collected.entries, Time::current_timestamp())?;
-        Self::write_atomically(&output, &bytes)?;
-        Self::report_success(collected.entries.len(), collected.failed, &output);
+        if csv {
+            Self::export_csv(&collected.entries)
+        } else {
+            Self::export_encrypted(&collected.entries)
+        }
+    }
 
+    fn export_encrypted(entries: &[ExportEntry]) -> Result<(), Box<dyn std::error::Error>> {
+        let passphrase = Self::prompt_export_passphrase()?;
+        let output = PathBuf::from(format!("cortex_export_{}.json", Self::random_token()));
+        let bytes =
+            export_format::encode_encrypted(&passphrase, entries, Time::current_timestamp())?;
+        Self::write_atomically(&output, &bytes)?;
+        eprintln!(
+            "\nEncrypted export completed with {} entries",
+            entries.len()
+        );
+        println!("\nExport saved to: {}", output.display());
+        println!("The file is encrypted. Import it with the export passphrase.");
+        Ok(())
+    }
+
+    fn export_csv(entries: &[ExportEntry]) -> Result<(), Box<dyn std::error::Error>> {
+        let output = PathBuf::from(format!("cortex_export_{}.csv", Self::random_token()));
+        let mut bytes = export_format::encode_csv(entries);
+        let written = Self::write_atomically(&output, &bytes);
+        bytes.zeroize();
+        written?;
+        eprintln!(
+            "\nPlaintext CSV export completed with {} entries",
+            entries.len()
+        );
+        println!("\nExport saved to: {}", output.display());
+        println!(
+            "The file is NOT encrypted. Keep it safe and delete it when you no longer need it."
+        );
         Ok(())
     }
 
@@ -116,39 +133,14 @@ impl Export {
         Ok(passphrase)
     }
 
-    fn encrypt_document(
-        passphrase: &SecureString,
-        entries: &[ExportEntry],
-        timestamp: u64,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        let document = ExportDocument {
-            version: EXPORT_FORMAT_VERSION,
-            timestamp,
-            entries,
-        };
-        let mut payload = serde_json::to_vec(&document)?;
-        let (crypto, salt) = Crypto::create(passphrase)?;
-        let sealed = crypto.seal_blob(&payload);
-        payload.zeroize();
-        let (ciphertext, nonce) = sealed?;
-        let file = EncryptedExport {
-            version: EXPORT_FORMAT_VERSION.to_string(),
-            timestamp,
-            salt,
-            nonce,
-            ciphertext,
-        };
-        Ok(serde_json::to_vec_pretty(&file)?)
-    }
-
     fn collect_entries(
         storage: &Storage,
         crypto: &Crypto,
     ) -> Result<Collected, Box<dyn std::error::Error>> {
         let mut collected = Collected {
             entries: Vec::new(),
-            failed: 0,
         };
+        let mut problems = Vec::new();
         let mut scanned: usize = 0;
 
         for item in storage.db.iter().take(MAX_ENTRIES + 1) {
@@ -157,20 +149,31 @@ impl Export {
                 Ok((key, value)) => match Self::decode_entry(crypto, &key, &value) {
                     Ok(Some(entry)) => collected.entries.push(entry),
                     Ok(None) => {}
-                    Err(message) => {
-                        eprintln!("{message}");
-                        collected.failed += 1;
-                    }
+                    Err(message) => problems.push(message),
                 },
-                Err(error) => {
-                    eprintln!("Database read error during export: {error}");
-                    collected.failed += 1;
-                }
+                Err(error) => problems.push(format!("Database read error during export: {error}")),
             }
         }
 
         if scanned > MAX_ENTRIES {
             return Err(format!("Too many entries to export (limit is {MAX_ENTRIES})").into());
+        }
+
+        for entry in &mut collected.entries {
+            if let Err(message) = export_format::normalize_and_validate(entry) {
+                problems.push(format!("{}: {message}", entry.name));
+            }
+        }
+
+        if !problems.is_empty() {
+            for problem in &problems {
+                eprintln!("  - {problem}");
+            }
+            return Err(format!(
+                "Export aborted: {} problem(s) found, no file was written",
+                problems.len()
+            )
+            .into());
         }
 
         Ok(collected)
@@ -221,6 +224,10 @@ impl Export {
         }
     }
 
+    fn random_token() -> String {
+        format!("{:016x}", OsRng.next_u64())
+    }
+
     fn write_atomically(output: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let temp_path = PathBuf::from(format!("{}.tmp", output.display()));
         let file = platform::create_private_file(&temp_path).map_err(|error| {
@@ -253,63 +260,5 @@ impl Export {
         writer.flush()?;
         writer.get_ref().sync_all()?;
         Ok(())
-    }
-
-    fn report_success(exported: usize, failed: usize, output: &Path) {
-        if failed > 0 {
-            eprintln!("\nExport completed with {exported} successful and {failed} failed entries");
-        } else {
-            eprintln!("\nExport completed successfully with {exported} entries");
-        }
-        println!("\nExport saved to: {}", output.display());
-        println!("The file is encrypted. Import it with the export passphrase.");
-    }
-
-    fn export_template() -> Result<(), Box<dyn std::error::Error>> {
-        let path = PathBuf::from(TEMPLATE_FILE_NAME);
-        let entries = Self::template_entries();
-        let document = ExportDocument {
-            version: EXPORT_FORMAT_VERSION,
-            timestamp: Time::current_timestamp(),
-            entries: &entries,
-        };
-        let bytes = serde_json::to_vec_pretty(&document)?;
-        let file = platform::create_private_file(&path).map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                format!("File already exists: {}", path.display())
-            } else {
-                error.to_string()
-            }
-        })?;
-        Self::write_bytes(file, &bytes)?;
-
-        println!("Template exported to {}", path.display());
-        println!("\nYou can use this template structure to import passwords.");
-        Ok(())
-    }
-
-    fn template_entries() -> Vec<ExportEntry> {
-        vec![
-            ExportEntry {
-                name: "heisenberg".to_string(),
-                password: "1AmTh3D4ng3r!".to_string(),
-                description: Some("Say my name - I am the one who knocks".to_string()),
-                tags: vec!["work".to_string(), "critical".to_string()],
-            },
-            ExportEntry {
-                name: "los-pollos".to_string(),
-                password: "Gustu5Fr!ng2024".to_string(),
-                description: Some("A man provides for his family".to_string()),
-                tags: vec!["business".to_string(), "finance".to_string()],
-            },
-            ExportEntry {
-                name: "saul-goodman".to_string(),
-                password: "B3tt3rC4llS4ul!".to_string(),
-                description: Some(
-                    "Did you know you have rights? Constitution says you do".to_string(),
-                ),
-                tags: vec!["legal".to_string(), "contacts".to_string()],
-            },
-        ]
     }
 }

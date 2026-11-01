@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "cortex",
     about = "Keep your passwords safe",
-    version = "3.0.0",
+    version = "4.0.0",
     author = "Nima Naseri <nerdnull@proton.me>"
 )]
 #[command(
@@ -96,19 +96,18 @@ pub enum Commands {
         special: bool,
     },
 
-    #[command(about = "Export all passwords to an encrypted JSON file")]
+    #[command(about = "Export all passwords to an encrypted file, or to plaintext CSV with --csv")]
     Export {
         #[arg(
-            short = 't',
-            long = "template",
-            help = "Export a sample template file instead of actual passwords"
+            long,
+            help = "Write a plaintext CSV file instead of an encrypted export"
         )]
-        template: bool,
+        csv: bool,
     },
 
-    #[command(about = "Import passwords from JSON file")]
+    #[command(about = "Import passwords from an encrypted export or a CSV export")]
     Import {
-        #[arg(help = "Path to JSON file to import")]
+        #[arg(help = "Path to an encrypted export or CSV file to import")]
         file: String,
         #[arg(
             short = 'o',

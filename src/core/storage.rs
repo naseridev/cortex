@@ -1,10 +1,10 @@
 use crate::core::types::PasswordEntry;
 use std::fs::{self, File};
-use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 const INIT_MARKER: &str = "__init__";
 const SALT_KEY: &str = "__salt__";
+const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
 const LOCK_FILE: &str = ".cortex.lock";
 
 pub struct Storage {
@@ -119,6 +119,30 @@ impl Storage {
             Some(data) => Ok(Some(data.to_vec())),
             None => Ok(None),
         }
+    }
+
+    pub(crate) fn failed_attempts(&self) -> Result<u32, Box<dyn std::error::Error>> {
+        Ok(match self.db.get(FAILED_ATTEMPTS_KEY)? {
+            Some(data) => <[u8; 4]>::try_from(data.as_ref()).map_or(0, u32::from_le_bytes),
+            None => 0,
+        })
+    }
+
+    pub(crate) fn record_failed_attempt(&self) -> Result<u32, Box<dyn std::error::Error>> {
+        let next = self.failed_attempts()?.saturating_add(1);
+        self.db
+            .insert(FAILED_ATTEMPTS_KEY, next.to_le_bytes().to_vec())
+            .map_err(|e| format!("Failed to record login attempt: {e}"))?;
+        self.db
+            .flush()
+            .map_err(|e| format!("Failed to flush database: {e}"))?;
+        Ok(next)
+    }
+
+    pub(crate) fn clear_failed_attempts(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.db.remove(FAILED_ATTEMPTS_KEY)?;
+        self.db.flush()?;
+        Ok(())
     }
 
     pub fn create_password(
@@ -324,56 +348,6 @@ impl Storage {
         }
 
         Ok(())
-    }
-
-    pub fn export_entries<W: Write>(
-        &self,
-        writer: &mut BufWriter<W>,
-        process_entry: impl Fn(&str, &PasswordEntry) -> Result<String, Box<dyn std::error::Error>>,
-    ) -> Result<(usize, usize), Box<dyn std::error::Error>> {
-        writeln!(writer, "# Cortex Password Export\n")?;
-
-        let mut processed = 0;
-        let mut failed = 0;
-
-        for item in self.db.iter() {
-            let Ok((key, value)) = item else { continue };
-
-            let key_str = String::from_utf8_lossy(&key);
-            if key_str.starts_with("__") {
-                continue;
-            }
-
-            processed += 1;
-
-            if processed % 1000 == 0 {
-                writer.flush()?;
-                eprint!("\rProcessed {processed} entries...");
-                std::io::stderr().flush()?;
-            }
-
-            match bincode::deserialize::<PasswordEntry>(&value) {
-                Ok(entry) => match process_entry(&key_str, &entry) {
-                    Ok(output) => {
-                        writeln!(writer, "{output}")?;
-                    }
-                    Err(_) => failed += 1,
-                },
-                Err(_) => failed += 1,
-            }
-        }
-
-        writer.flush()?;
-
-        if processed >= 1000 {
-            eprintln!("\rCompleted {processed} entries.");
-        }
-
-        if failed > 0 {
-            eprintln!("Warning: {failed} entries failed to process");
-        }
-
-        Ok((processed, failed))
     }
 
     pub fn create_backup(&self) -> Result<(), Box<dyn std::error::Error>> {

@@ -35,7 +35,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ignore_case,
             names_only,
         } => Find::execute(&pattern, ignore_case, names_only),
-        Commands::Export { template } => Export::execute(template),
+        Commands::Export { csv } => Export::execute(csv),
         Commands::Import { file, overwrite } => Import::execute(&file, overwrite),
         Commands::Reset => Reset::execute(),
         Commands::Purge => Purge::execute(),

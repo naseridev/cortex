@@ -6,9 +6,9 @@ use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead, aead::Paylo
 use rand::{RngCore, rngs::OsRng};
 use zeroize::Zeroize;
 
-const KDF_VERSION_ARGON2: u8 = 3;
-const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
-const ARGON2_TIME: u32 = 2;
+const KDF_VERSION_ARGON2: u8 = 4;
+const ARGON2_MEMORY_KIB: u32 = 64 * 1024;
+const ARGON2_TIME: u32 = 3;
 const ARGON2_PARALLELISM: u32 = 1;
 
 const FIELD_PASSWORD: &str = "password";
@@ -192,9 +192,10 @@ impl Crypto {
             .map_err(|error| format!("Invalid Argon2 parameters: {error}"))?;
         let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
         let mut key = [0u8; 32];
-        argon
-            .hash_password_into(password, salt, &mut key)
-            .map_err(|error| format!("Argon2id derivation failed: {error}"))?;
+        if let Err(error) = argon.hash_password_into(password, salt, &mut key) {
+            key.zeroize();
+            return Err(format!("Argon2id derivation failed: {error}").into());
+        }
         Ok(Self::from_parts(key))
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "cortex"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2024"
 authors = ["Nima Naseri <nerdnull@proton.me>"]
 description = "A secure password manager with Argon2id key derivation and authenticated encryption"

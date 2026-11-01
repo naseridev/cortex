@@ -5,10 +5,10 @@ use crate::{
         platform,
         storage::Storage,
         time::Time,
-        types::{ExportEntry, PasswordEntry, SecureString},
+        types::{EncryptedExport, ExportEntry, PasswordEntry, SecureString},
     },
-    modules::gateway::Gateway,
-    utils::security::Security,
+    modules::{gateway::Gateway, password::Password},
+    ui::prompt::UserPrompt,
 };
 use serde::Serialize;
 use std::{
@@ -18,10 +18,9 @@ use std::{
 };
 use zeroize::Zeroize;
 
-const EXPORT_FORMAT_VERSION: &str = "3.0.0";
+const EXPORT_FORMAT_VERSION: &str = "4.0.0";
 const TEMPLATE_FILE_NAME: &str = "cortex_template.json";
 const WRITE_BUFFER_BYTES: usize = 64 * 1024;
-const EXPORT_WARNING: &str = "I understand this exports passwords in plain text";
 
 pub struct Export;
 
@@ -84,30 +83,62 @@ impl Export {
 
         let (storage, crypto) = Gateway::login()?;
 
-        Self::print_plaintext_warning();
-        Security::confirmation(EXPORT_WARNING)?;
-
-        let output = PathBuf::from(format!(
-            "cortex_export_{:x}.json",
-            Time::current_timestamp()
-        ));
-
         let mut collected = Self::collect_entries(&storage, &crypto)?;
         if collected.entries.is_empty() {
             println!("No entries were successfully exported.");
             return Ok(());
         }
 
+        let passphrase = Self::prompt_export_passphrase()?;
         collected.entries.sort_by(|a, b| a.name.cmp(&b.name));
-        Self::write_atomically(&output, &collected.entries)?;
+
+        let output = PathBuf::from(format!(
+            "cortex_export_{:x}.json",
+            Time::current_timestamp()
+        ));
+        let bytes =
+            Self::encrypt_document(&passphrase, &collected.entries, Time::current_timestamp())?;
+        Self::write_atomically(&output, &bytes)?;
         Self::report_success(collected.entries.len(), collected.failed, &output);
 
         Ok(())
     }
 
-    fn print_plaintext_warning() {
-        println!("\nThis will export ALL passwords in PLAIN TEXT format!");
-        println!("Anyone with access to this file can read your passwords.");
+    fn prompt_export_passphrase() -> Result<SecureString, Box<dyn std::error::Error>> {
+        println!("\nThe export is encrypted with a separate passphrase.");
+        println!("You need this passphrase to import the file, and it cannot be recovered.");
+        let passphrase = UserPrompt::password("Export passphrase: ")?;
+        if let Err(message) = Password::security_check(passphrase.as_str()) {
+            return Err(message.into());
+        }
+        let confirmation = UserPrompt::password("Confirm export passphrase: ")?;
+        Password::match_check(passphrase.as_str(), confirmation.as_str())?;
+        Ok(passphrase)
+    }
+
+    fn encrypt_document(
+        passphrase: &SecureString,
+        entries: &[ExportEntry],
+        timestamp: u64,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let document = ExportDocument {
+            version: EXPORT_FORMAT_VERSION,
+            timestamp,
+            entries,
+        };
+        let mut payload = serde_json::to_vec(&document)?;
+        let (crypto, salt) = Crypto::create(passphrase)?;
+        let sealed = crypto.seal_blob(&payload);
+        payload.zeroize();
+        let (ciphertext, nonce) = sealed?;
+        let file = EncryptedExport {
+            version: EXPORT_FORMAT_VERSION.to_string(),
+            timestamp,
+            salt,
+            nonce,
+            ciphertext,
+        };
+        Ok(serde_json::to_vec_pretty(&file)?)
     }
 
     fn collect_entries(
@@ -190,10 +221,7 @@ impl Export {
         }
     }
 
-    fn write_atomically(
-        output: &Path,
-        entries: &[ExportEntry],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn write_atomically(output: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let temp_path = PathBuf::from(format!("{}.tmp", output.display()));
         let file = platform::create_private_file(&temp_path).map_err(|error| {
             if error.kind() == io::ErrorKind::AlreadyExists {
@@ -206,7 +234,7 @@ impl Export {
             }
         })?;
         let mut temp = TempFile::new(temp_path);
-        Self::write_json(file, entries)?;
+        Self::write_bytes(file, bytes)?;
         fs::hard_link(&temp.path, output).map_err(|error| {
             if error.kind() == io::ErrorKind::AlreadyExists {
                 format!("File already exists: {}", output.display())
@@ -219,14 +247,9 @@ impl Export {
         Ok(())
     }
 
-    fn write_json(file: File, entries: &[ExportEntry]) -> Result<(), Box<dyn std::error::Error>> {
-        let document = ExportDocument {
-            version: EXPORT_FORMAT_VERSION,
-            timestamp: Time::current_timestamp(),
-            entries,
-        };
+    fn write_bytes(file: File, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let mut writer = BufWriter::with_capacity(WRITE_BUFFER_BYTES, file);
-        serde_json::to_writer_pretty(&mut writer, &document)?;
+        writer.write_all(bytes)?;
         writer.flush()?;
         writer.get_ref().sync_all()?;
         Ok(())
@@ -239,13 +262,18 @@ impl Export {
             eprintln!("\nExport completed successfully with {exported} entries");
         }
         println!("\nExport saved to: {}", output.display());
-        println!("\nREMEMBER: This file contains UNENCRYPTED passwords!");
-        println!("Secure or delete it immediately after use.");
+        println!("The file is encrypted. Import it with the export passphrase.");
     }
 
     fn export_template() -> Result<(), Box<dyn std::error::Error>> {
         let path = PathBuf::from(TEMPLATE_FILE_NAME);
         let entries = Self::template_entries();
+        let document = ExportDocument {
+            version: EXPORT_FORMAT_VERSION,
+            timestamp: Time::current_timestamp(),
+            entries: &entries,
+        };
+        let bytes = serde_json::to_vec_pretty(&document)?;
         let file = platform::create_private_file(&path).map_err(|error| {
             if error.kind() == io::ErrorKind::AlreadyExists {
                 format!("File already exists: {}", path.display())
@@ -253,7 +281,7 @@ impl Export {
                 error.to_string()
             }
         })?;
-        Self::write_json(file, &entries)?;
+        Self::write_bytes(file, &bytes)?;
 
         println!("Template exported to {}", path.display());
         println!("\nYou can use this template structure to import passwords.");

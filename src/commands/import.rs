@@ -2,12 +2,16 @@ use crate::{
     core::{
         crypto::Crypto,
         storage::Storage,
-        types::{ExportData, ExportEntry, PasswordEntry, SecureString},
+        types::{
+            EncryptedExport, ExportData, ExportEntry, ExportFile, PasswordEntry, SecureString,
+        },
     },
     modules::{gateway::Gateway, password::Password, tags::TagValidator},
+    ui::prompt::UserPrompt,
 };
 use std::collections::HashSet;
 use std::{fs::File, io::BufReader, path::Path};
+use zeroize::Zeroize;
 
 const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
 
@@ -44,14 +48,32 @@ impl Import {
         let file =
             File::open(Path::new(file_path)).map_err(|_| format!("File not found: {file_path}"))?;
         let reader = BufReader::new(file);
-        let import_data: ExportData =
+        let export_file: ExportFile =
             serde_json::from_reader(reader).map_err(|e| format!("Invalid JSON format: {e}"))?;
+        let import_data = match export_file {
+            ExportFile::Plain(data) => data,
+            ExportFile::Encrypted(encrypted) => Self::decrypt_export(&encrypted)?,
+        };
 
         if import_data.entries.is_empty() {
             return Err("No entries found in import file".into());
         }
 
         Ok(import_data)
+    }
+
+    fn decrypt_export(
+        encrypted: &EncryptedExport,
+    ) -> Result<ExportData, Box<dyn std::error::Error>> {
+        let passphrase = UserPrompt::password("Export passphrase: ")?;
+        let crypto = Crypto::open(&passphrase, &encrypted.salt)?;
+        let mut plaintext = crypto
+            .open_blob(&encrypted.nonce, &encrypted.ciphertext)
+            .map_err(|_| "Wrong export passphrase or damaged export file")?;
+        let parsed = serde_json::from_slice::<ExportData>(&plaintext)
+            .map_err(|e| format!("Invalid export payload: {e}"));
+        plaintext.zeroize();
+        Ok(parsed?)
     }
 
     fn validate_entries(
@@ -294,7 +316,6 @@ trait ZeroizeExt {
 
 impl ZeroizeExt for String {
     fn zeroize_string(&mut self) {
-        use zeroize::Zeroize;
         self.zeroize();
     }
 }

@@ -4,11 +4,9 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead, aead::Payload};
 use rand::{RngCore, rngs::OsRng};
-use std::sync::OnceLock;
-use sysinfo::{CpuRefreshKind, RefreshKind, System};
 use zeroize::Zeroize;
 
-const KDF_VERSION_ARGON2: u8 = 2;
+const KDF_VERSION_ARGON2: u8 = 3;
 const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
 const ARGON2_TIME: u32 = 2;
 const ARGON2_PARALLELISM: u32 = 1;
@@ -16,8 +14,8 @@ const ARGON2_PARALLELISM: u32 = 1;
 const FIELD_PASSWORD: &str = "password";
 const FIELD_DESCRIPTION: &str = "description";
 const FIELD_TAGS: &str = "tags";
-
-static HARDWARE_ID_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
+const BLOB_NAME: &str = "cortex_export";
+const BLOB_FIELD: &str = "payload";
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
@@ -189,39 +187,36 @@ impl Crypto {
         blob
     }
 
-    pub fn get_hardware_id() -> &'static [u8] {
-        HARDWARE_ID_CACHE.get_or_init(|| {
-            let mut hasher = Hasher::new();
-            let sys =
-                System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::new()));
-
-            if let Some(cpu) = sys.cpus().first() {
-                let brand = cpu.brand();
-                if !brand.is_empty() {
-                    hasher.update(brand.as_bytes());
-                }
-            }
-
-            hasher.update(b"cortex_hardware_binding");
-            hasher.finalize().as_bytes().to_vec()
-        })
-    }
-
     fn from_argon2(password: &[u8], salt: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
         let params = Params::new(ARGON2_MEMORY_KIB, ARGON2_TIME, ARGON2_PARALLELISM, Some(32))
             .map_err(|error| format!("Invalid Argon2 parameters: {error}"))?;
         let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        let mut material = password_material(password);
         let mut key = [0u8; 32];
-        let result = argon.hash_password_into(&material, salt, &mut key);
-        material.zeroize();
-        result.map_err(|error| format!("Argon2id derivation failed: {error}"))?;
+        argon
+            .hash_password_into(password, salt, &mut key)
+            .map_err(|error| format!("Argon2id derivation failed: {error}"))?;
         Ok(Self::from_parts(key))
     }
 
     fn from_parts(key: [u8; 32]) -> Self {
         let cipher = ChaCha20Poly1305::new((&key).into());
         Self { cipher, key }
+    }
+
+    pub fn seal_blob(
+        &self,
+        plaintext: &[u8],
+    ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
+        self.seal(BLOB_NAME, BLOB_FIELD, plaintext)
+    }
+
+    pub fn open_blob(
+        &self,
+        nonce: &[u8; 12],
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        self.open_field(BLOB_NAME, BLOB_FIELD, nonce, ciphertext)
+            .map_err(|error| format!("Blob decryption failed: {error:?}").into())
     }
 
     fn seal(
@@ -264,14 +259,6 @@ impl Crypto {
             },
         )
     }
-}
-
-fn password_material(password: &[u8]) -> Vec<u8> {
-    let hardware_id = Crypto::get_hardware_id();
-    let mut material = Vec::with_capacity(password.len() + hardware_id.len());
-    material.extend_from_slice(password);
-    material.extend_from_slice(hardware_id);
-    material
 }
 
 fn associated_data(name: &str, field: &str) -> Vec<u8> {

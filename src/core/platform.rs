@@ -9,13 +9,6 @@ pub fn create_private_file(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
-pub fn replace_private_file(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    restrict_to_owner(&mut options);
-    options.open(path)
-}
-
 #[cfg(unix)]
 fn restrict_to_owner(options: &mut OpenOptions) {
     use std::os::unix::fs::OpenOptionsExt;

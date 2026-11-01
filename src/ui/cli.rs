@@ -7,7 +7,9 @@ use clap::{Parser, Subcommand};
     version = "3.0.0",
     author = "Nima Naseri <nerdnull@proton.me>"
 )]
-#[command(long_about = "A no-nonsense password manager using hardware-backed key derivation.")]
+#[command(
+    long_about = "A no-nonsense password manager using Argon2id key derivation and authenticated encryption."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -30,6 +32,11 @@ pub enum Commands {
     Get {
         #[arg(help = "Name of the password entry to retrieve")]
         name: String,
+        #[arg(
+            long,
+            help = "Print the password instead of copying it to the clipboard"
+        )]
+        show: bool,
     },
 
     #[command(about = "Edit password and description for existing entry")]
@@ -89,7 +96,7 @@ pub enum Commands {
         special: bool,
     },
 
-    #[command(about = "Export all passwords to JSON file")]
+    #[command(about = "Export all passwords to an encrypted JSON file")]
     Export {
         #[arg(
             short = 't',

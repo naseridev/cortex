@@ -60,7 +60,7 @@ impl Reset {
         }
 
         storage.atomic_reset(&updated_entries, &new_crypto.verification(), &new_salt)?;
-        Session::save_session(new_crypto.key())?;
+        Session::clear_session()?;
 
         println!("Master password reset successfully.");
 

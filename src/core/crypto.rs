@@ -8,7 +8,6 @@ use std::sync::OnceLock;
 use sysinfo::{CpuRefreshKind, RefreshKind, System};
 use zeroize::Zeroize;
 
-const LEGACY_KDF_ITERATIONS: u32 = 600_000;
 const KDF_VERSION_ARGON2: u8 = 2;
 const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
 const ARGON2_TIME: u32 = 2;
@@ -23,7 +22,6 @@ static HARDWARE_ID_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
     key: [u8; 32],
-    legacy: bool,
 }
 
 impl Drop for Crypto {
@@ -51,31 +49,18 @@ impl Crypto {
                 salt_array.copy_from_slice(salt);
                 Self::from_argon2(master_password.as_bytes(), &salt_array)
             }
-            salt if salt.len() == 32 => {
-                let mut salt_array = [0u8; 32];
-                salt_array.copy_from_slice(salt);
-                Ok(Self::from_legacy_blake3(
-                    master_password.as_bytes(),
-                    &salt_array,
-                ))
-            }
             _ => Err("Unrecognized key derivation format".into()),
         }
     }
 
     #[must_use]
     pub fn from_key(key: [u8; 32]) -> Self {
-        Self::from_parts(key, false)
+        Self::from_parts(key)
     }
 
     #[must_use]
     pub fn key(&self) -> &[u8; 32] {
         &self.key
-    }
-
-    #[must_use]
-    pub fn is_legacy(&self) -> bool {
-        self.legacy
     }
 
     #[must_use]
@@ -231,37 +216,12 @@ impl Crypto {
         let result = argon.hash_password_into(&material, salt, &mut key);
         material.zeroize();
         result.map_err(|error| format!("Argon2id derivation failed: {error}"))?;
-        Ok(Self::from_parts(key, false))
+        Ok(Self::from_parts(key))
     }
 
-    fn from_legacy_blake3(password: &[u8], salt: &[u8]) -> Self {
-        let hardware_id = Self::get_hardware_id();
-        let mut hasher = Hasher::new();
-        hasher.update(password);
-        hasher.update(salt);
-        hasher.update(hardware_id);
-
-        let mut derived = *hasher.finalize().as_bytes();
-        for _ in 0..LEGACY_KDF_ITERATIONS {
-            let mut hasher = Hasher::new();
-            hasher.update(&derived);
-            hasher.update(salt);
-            hasher.update(hardware_id);
-            derived = *hasher.finalize().as_bytes();
-        }
-
-        let crypto = Self::from_parts(derived, true);
-        derived.zeroize();
-        crypto
-    }
-
-    fn from_parts(key: [u8; 32], legacy: bool) -> Self {
+    fn from_parts(key: [u8; 32]) -> Self {
         let cipher = ChaCha20Poly1305::new((&key).into());
-        Self {
-            cipher,
-            key,
-            legacy,
-        }
+        Self { cipher, key }
     }
 
     fn seal(
@@ -273,7 +233,7 @@ impl Crypto {
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
-        let aad = associated_data(name, field, self.legacy);
+        let aad = associated_data(name, field);
         let encrypted = self
             .cipher
             .encrypt(
@@ -295,7 +255,7 @@ impl Crypto {
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, chacha20poly1305::aead::Error> {
         let nonce = Nonce::from_slice(nonce_bytes);
-        let aad = associated_data(name, field, self.legacy);
+        let aad = associated_data(name, field);
         self.cipher.decrypt(
             nonce,
             Payload {
@@ -314,10 +274,7 @@ fn password_material(password: &[u8]) -> Vec<u8> {
     material
 }
 
-fn associated_data(name: &str, field: &str, legacy: bool) -> Vec<u8> {
-    if legacy {
-        return Vec::new();
-    }
+fn associated_data(name: &str, field: &str) -> Vec<u8> {
     let name_bytes = name.as_bytes();
     let field_bytes = field.as_bytes();
     let name_len = u32::try_from(name_bytes.len()).unwrap_or(u32::MAX);

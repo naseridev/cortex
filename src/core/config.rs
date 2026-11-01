@@ -8,12 +8,7 @@ static CONFIG_CACHE: OnceLock<Arc<Mutex<Option<Config>>>> = OnceLock::new();
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
-    #[serde(default = "default_session_timeout")]
     pub session_timeout_seconds: u64,
-}
-
-fn default_session_timeout() -> u64 {
-    480
 }
 
 impl Default for Config {

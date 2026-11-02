@@ -42,7 +42,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Restore { file } => Restore::execute(&file),
         Commands::Purge => Purge::execute(),
         Commands::Lock => Lock::execute(),
-        Commands::Config { action } => run_config(action),
+        Commands::Config { action } => match action {
+            Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
+            Some(ConfigAction::Show) | None => ConfigCmd::show(),
+        },
         Commands::Pass {
             length,
             count,
@@ -51,17 +54,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             digits,
             special,
         } => {
-            let charset = charset_from_flags(uppercase, lowercase, digits, special);
-            Pass::execute(length, count, charset)
+            let bits = [
+                (uppercase, PasswordCharset::UPPERCASE),
+                (lowercase, PasswordCharset::LOWERCASE),
+                (digits, PasswordCharset::DIGITS),
+                (special, PasswordCharset::SPECIAL),
+            ]
+            .into_iter()
+            .filter(|(enabled, _)| *enabled)
+            .fold(0, |bits, (_, flag)| bits | flag);
+            Pass::execute(length, count, PasswordCharset::from_bits(bits))
         }
         Commands::Tag { action } => run_tag(action),
-    }
-}
-
-fn run_config(action: Option<ConfigAction>) -> Result<(), Box<dyn std::error::Error>> {
-    match action {
-        Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
-        Some(ConfigAction::Show) | None => ConfigCmd::show(),
     }
 }
 
@@ -71,23 +75,4 @@ fn run_tag(action: TagAction) -> Result<(), Box<dyn std::error::Error>> {
         TagAction::Add { name, tags } => Tag::add(&name, &TagValidator::parse_input(&tags)),
         TagAction::Remove { name, tags } => Tag::remove(&name, &TagValidator::parse_input(&tags)),
     }
-}
-
-fn charset_from_flags(
-    uppercase: bool,
-    lowercase: bool,
-    digits: bool,
-    special: bool,
-) -> PasswordCharset {
-    let bits = [
-        (uppercase, PasswordCharset::UPPERCASE),
-        (lowercase, PasswordCharset::LOWERCASE),
-        (digits, PasswordCharset::DIGITS),
-        (special, PasswordCharset::SPECIAL),
-    ]
-    .into_iter()
-    .filter(|(enabled, _)| *enabled)
-    .fold(0, |bits, (_, flag)| bits | flag);
-
-    PasswordCharset::from_bits(bits)
 }

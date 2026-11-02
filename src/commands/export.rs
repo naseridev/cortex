@@ -6,7 +6,7 @@ use crate::{
         storage::{Storage, decode_value},
         types::{ExportEntry, PasswordEntry, decode_secret_text},
     },
-    core::export_format,
+    core::interchange,
     modules::gateway::Gateway,
     modules::security::Security,
 };
@@ -45,7 +45,7 @@ impl Export {
         let rejected = collected
             .entries
             .iter()
-            .filter(|entry| export_format::would_fail_import(entry))
+            .filter(|entry| interchange::would_fail_import(entry))
             .count();
         if rejected > 0 {
             eprintln!(
@@ -60,7 +60,7 @@ impl Export {
 
     fn export_csv(entries: &[ExportEntry]) -> Result<(), Box<dyn std::error::Error>> {
         let output = PathBuf::from(format!("cortex_export_{}.csv", Self::random_token()));
-        let mut bytes = export_format::encode_csv(entries)?;
+        let mut bytes = interchange::encode_csv(entries)?;
         let written = Self::write_atomically(&output, &bytes);
         bytes.zeroize();
         written?;
@@ -97,7 +97,7 @@ impl Export {
         }
 
         for entry in &mut collected.entries {
-            if let Err(message) = export_format::validate_stored(entry) {
+            if let Err(message) = interchange::validate_stored(entry) {
                 problems.push(format!("{}: {message}", entry.name));
             }
         }

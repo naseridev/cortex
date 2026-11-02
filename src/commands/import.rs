@@ -5,7 +5,7 @@ use crate::{
         storage::Storage,
         types::{ExportEntry, PasswordEntry},
     },
-    core::export_format,
+    core::interchange,
     modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
@@ -79,8 +79,8 @@ impl Import {
 
     fn parse_import(bytes: &[u8]) -> Result<ImportSource, Box<dyn std::error::Error>> {
         match std::str::from_utf8(bytes) {
-            Ok(text) if export_format::is_csv(text) || !text.trim_start().starts_with('{') => {
-                let entries = export_format::decode_csv(text)?;
+            Ok(text) if interchange::is_csv(text) || !text.trim_start().starts_with('{') => {
+                let entries = interchange::decode_csv(text)?;
                 Ok(ImportSource {
                     format: "plaintext CSV",
                     version: None,
@@ -89,9 +89,9 @@ impl Import {
                 })
             }
             _ => {
-                let file = export_format::parse_encrypted(bytes)?;
+                let file = interchange::parse_encrypted(bytes)?;
                 let passphrase = UserPrompt::password("Export passphrase: ")?;
-                let data = export_format::open_encrypted(&passphrase, &file)?;
+                let data = interchange::open_encrypted(&passphrase, &file)?;
                 Ok(ImportSource {
                     format: "encrypted export",
                     version: Some(data.version),
@@ -113,7 +113,7 @@ impl Import {
                 continue;
             }
 
-            match export_format::validate_import(&mut entry) {
+            match interchange::validate_import(&mut entry) {
                 Ok(()) => validated_entries.push(entry),
                 Err(message) => validation_errors.push(format!("{}: {message}", entry.name)),
             }

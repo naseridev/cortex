@@ -1,7 +1,7 @@
 use cortex::core::crypto::Crypto;
 use cortex::core::limits::MAX_ENTRIES;
 use cortex::core::types::{EncryptedExport, ExportEntry};
-use cortex::core::export_format::{
+use cortex::core::interchange::{
     CSV_HEADER, FORMAT_VERSION, decode_csv, encode_csv, is_csv, open_encrypted, parse_encrypted,
     validate_import, validate_stored,
 };

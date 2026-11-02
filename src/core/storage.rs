@@ -1,6 +1,14 @@
+pub use crate::core::snapshot::Snapshot;
+pub use crate::mcp::config::{McpConfig, McpPermission};
+
 use crate::core::{
+    accounts::Accounts,
     crypto::Crypto,
-    dump::{self, DumpFile},
+    dump::DumpFile,
+    integrity::{
+        Changes, MANIFEST_KEY, Records, digest_records, is_reserved_key, is_reserved_name,
+        verify_manifest,
+    },
     limits::MAX_ENTRIES,
     platform,
     types::PasswordEntry,
@@ -8,43 +16,20 @@ use crate::core::{
 use redb::{Database, DatabaseError, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
-use std::collections::BTreeMap;
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
 pub const RESERVED_PREFIX: &str = "__";
 
-const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
-const ACCOUNTS_FILE: &str = "accounts.bin";
-const LEGACY_DB_DIR: &str = ".password-store";
-const INIT_MARKER: &str = "__init__";
-const SALT_KEY: &str = "__salt__";
-const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
-const MANIFEST_KEY: &str = "__manifest__";
-const DUMP_PREFIX: &str = "dump_";
-const DUMP_SUFFIX: &str = ".bin";
-const MAX_SEARCH_PATTERN_BYTES: usize = 100;
+pub(crate) const INIT_MARKER: &str = "__init__";
+pub(crate) const SALT_KEY: &str = "__salt__";
+pub(crate) const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
 
-const INVALID_DUMP_MESSAGE: &str = "Dump content is invalid or damaged.";
-const WRONG_PASSWORD_OR_DAMAGED_MESSAGE: &str = "Wrong master password or damaged dump file.";
-const DUMP_HEADER_MISMATCH_MESSAGE: &str = "Dump header does not match its contents.";
-const DUMP_INTEGRITY_MESSAGE: &str = "Dump integrity check failed.";
-const INTEGRITY_FAILED_MESSAGE: &str = "Database integrity check failed. Stored data was modified, replaced or removed outside of cortex.";
-const LEGACY_VAULT_MESSAGE: &str =
-    "This vault predates integrity protection. Run 'reset' once to upgrade it.";
+const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
+const LEGACY_DB_DIR: &str = ".password-store";
+const MAX_SEARCH_PATTERN_BYTES: usize = 100;
 const LEGACY_DATABASE_MESSAGE: &str = "A database from an older cortex version was found. Export it to CSV with that version, run 'account create' here, then 'import' the CSV.";
 const DATABASE_LOCKED_MESSAGE: &str = "Database is locked by another process";
-
-type Changes = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
-type Records = Vec<(Vec<u8>, Vec<u8>)>;
-
-#[derive(Serialize, Deserialize, Default, Clone)]
-struct AccountRegistry {
-    active: Option<String>,
-    accounts: Vec<String>,
-}
 
 pub(crate) fn encode_value<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
     postcard::to_allocvec(value).map_err(|error| format!("Failed to serialize data: {error}"))
@@ -52,18 +37,6 @@ pub(crate) fn encode_value<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
 
 pub(crate) fn decode_value<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
     postcard::from_bytes(bytes).map_err(|error| format!("Failed to deserialize data: {error}"))
-}
-
-pub struct Snapshot {
-    entries: Records,
-    user_count: usize,
-}
-
-impl Snapshot {
-    #[must_use]
-    pub fn user_count(&self) -> usize {
-        self.user_count
-    }
 }
 
 pub struct Storage {
@@ -78,7 +51,7 @@ impl Storage {
     }
 
     pub fn open_account(name: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let db_path = Self::get_account_db_path(name)?;
+        let db_path = Accounts::db_path(name)?;
         Self::open_at(&db_path)
     }
 
@@ -147,26 +120,8 @@ impl Storage {
     pub fn verify_integrity(&self) -> Result<(), Box<dyn std::error::Error>> {
         let key = self.integrity_key()?;
         let records = self.records()?;
-        let expected = digest_records(&key, &records, &Changes::new());
-
-        match self.get_raw(MANIFEST_KEY.as_bytes())? {
-            Some(stored) => {
-                let stored_bytes =
-                    <[u8; 32]>::try_from(&stored[..]).map_err(|_| INTEGRITY_FAILED_MESSAGE)?;
-                if blake3::Hash::from(stored_bytes) == expected {
-                    Ok(())
-                } else {
-                    Err(INTEGRITY_FAILED_MESSAGE.into())
-                }
-            }
-            None => {
-                if records.iter().any(|(name, _)| !is_reserved_key(name)) {
-                    Err(LEGACY_VAULT_MESSAGE.into())
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        let stored_manifest = self.get_raw(MANIFEST_KEY.as_bytes())?;
+        verify_manifest(&key, &records, stored_manifest)
     }
 
     pub fn get_salt(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
@@ -345,53 +300,19 @@ impl Storage {
         self.write_dump(&dump_dir, crypto)
     }
 
+    pub fn write_dump(
+        &self,
+        dump_dir: &Path,
+        crypto: &Crypto,
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        Snapshot::write_to_dir(self, dump_dir, crypto)
+    }
+
     pub fn read_dump(
         file: &DumpFile,
         crypto: &Crypto,
     ) -> Result<Snapshot, Box<dyn std::error::Error>> {
-        let mut plain = crypto
-            .open_dump(&file.nonce, &file.ciphertext)
-            .map_err(|_| WRONG_PASSWORD_OR_DAMAGED_MESSAGE)?;
-
-        let parsed: Result<Records, String> = decode_value(&plain);
-        plain.zeroize();
-
-        let entries = parsed.map_err(|_| INVALID_DUMP_MESSAGE)?;
-        let find = |key: &str| -> Option<&[u8]> {
-            entries
-                .iter()
-                .find(|(name, _)| name.as_slice() == key.as_bytes())
-                .map(|(_, value)| value.as_slice())
-        };
-
-        let init = find(INIT_MARKER).ok_or(INVALID_DUMP_MESSAGE)?;
-        let salt = find(SALT_KEY).ok_or(INVALID_DUMP_MESSAGE)?;
-        let manifest = find(MANIFEST_KEY).ok_or(INVALID_DUMP_MESSAGE)?;
-
-        if salt != file.salt.as_slice() {
-            return Err(DUMP_HEADER_MISMATCH_MESSAGE.into());
-        }
-
-        if !crypto.matches_verification(init) {
-            return Err(WRONG_PASSWORD_OR_DAMAGED_MESSAGE.into());
-        }
-
-        let stored_manifest = <[u8; 32]>::try_from(manifest).map_err(|_| INVALID_DUMP_MESSAGE)?;
-        let expected = snapshot_digest(&crypto.integrity_key(), &entries);
-
-        if blake3::Hash::from(stored_manifest) != expected {
-            return Err(DUMP_INTEGRITY_MESSAGE.into());
-        }
-
-        let user_count = entries
-            .iter()
-            .filter(|(name, _)| !is_reserved_key(name))
-            .count();
-
-        Ok(Snapshot {
-            entries,
-            user_count,
-        })
+        Snapshot::from_dump(file, crypto)
     }
 
     pub fn replace_with_dump(&self, snapshot: &Snapshot) -> Result<(), Box<dyn std::error::Error>> {
@@ -454,295 +375,26 @@ impl Storage {
         Ok(records)
     }
 
-    pub fn write_dump(
-        &self,
-        dump_dir: &Path,
-        crypto: &Crypto,
-    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-        fs::create_dir_all(dump_dir).map_err(|error| {
-            format!("Failed to create directory {}: {error}", dump_dir.display())
-        })?;
-
-        let salt = self
-            .get_salt()?
-            .ok_or("Database salt not found. Database may be corrupted.")?;
-
-        let snapshot = self.records()?;
-        let mut plain = encode_value(&snapshot)?;
-
-        drop(snapshot);
-
-        let sealed = crypto.seal_dump(&plain);
-        plain.zeroize();
-
-        let (ciphertext, nonce) = sealed?;
-        let bytes = dump::encode(&DumpFile {
-            salt,
-            nonce,
-            ciphertext,
-        })?;
-
-        let path = dump_dir.join(format!(
-            "{DUMP_PREFIX}{:020}{DUMP_SUFFIX}",
-            Self::dump_stamp()
-        ));
-
-        Self::write_new_file(&path, &bytes)?;
-        Ok(path)
-    }
-
-    fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-        let directory = path.parent().unwrap_or(Path::new("."));
-        let mut temp = tempfile::NamedTempFile::new_in(directory).map_err(|error| {
-            format!("Failed to create dump in {}: {error}", directory.display())
-        })?;
-
-        temp.write_all(bytes)
-            .map_err(|error| format!("Failed to write dump {}: {error}", path.display()))?;
-        temp.as_file()
-            .sync_all()
-            .map_err(|error| format!("Failed to write dump {}: {error}", path.display()))?;
-
-        platform::restrict_to_owner(temp.path())
-            .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
-        temp.persist_noclobber(path)
-            .map_err(|error| format!("Failed to save dump {}: {}", path.display(), error.error))?;
-
-        Ok(())
-    }
-
-    fn dump_stamp() -> u128 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_nanos())
-    }
-
-    pub fn cortex_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let mut path =
-            platform::config_dir().ok_or("Could not determine the configuration directory")?;
-        path.push("cortex");
-
-        fs::create_dir_all(&path)
-            .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
-        platform::restrict_to_owner(&path)
-            .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
-
-        Ok(path)
-    }
-
     #[must_use]
     pub fn account_file_name(name: &str) -> String {
-        let hash = blake3::hash(name.as_bytes());
-        format!("{}.redb", hash.to_hex())
-    }
-
-    pub fn get_account_db_path(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let mut path = Self::cortex_dir()?;
-        path.push(Self::account_file_name(name));
-        Ok(path)
-    }
-
-    pub fn active_account() -> Result<Option<String>, Box<dyn std::error::Error>> {
-        Ok(Self::load_registry()?.active)
-    }
-
-    pub fn account_exists(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let registry = Self::load_registry()?;
-        Ok(registry.accounts.iter().any(|account| account == name)
-            && Self::account_db_file_exists(name)?)
-    }
-
-    pub fn list_accounts() -> Result<(Vec<String>, Option<String>), Box<dyn std::error::Error>> {
-        let registry = Self::load_registry()?;
-        Ok((registry.accounts, registry.active))
-    }
-
-    pub fn register_account(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut registry = Self::load_registry()?;
-        if !registry.accounts.iter().any(|account| account == name) {
-            registry.accounts.push(name.to_string());
-            registry.accounts.sort();
-        }
-        registry.active = Some(name.to_string());
-        Self::save_registry(&registry)
-    }
-
-    pub fn switch_account(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut registry = Self::load_registry()?;
-        if !registry.accounts.iter().any(|account| account == name) {
-            return Err(format!("Account '{name}' not found.").into());
-        }
-        registry.active = Some(name.to_string());
-        Self::save_registry(&registry)
-    }
-
-    pub fn rename_account(
-        old_name: &str,
-        new_name: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut registry = Self::load_registry()?;
-
-        if !registry.accounts.iter().any(|name| name == old_name) {
-            return Err(format!("Account '{old_name}' not found.").into());
-        }
-
-        if registry.accounts.iter().any(|name| name == new_name)
-            || Self::account_db_file_exists(new_name)?
-        {
-            return Err(format!("Account '{new_name}' already exists.").into());
-        }
-
-        let old_path = Self::get_account_db_path(old_name)?;
-        let new_path = Self::get_account_db_path(new_name)?;
-
-        fs::rename(&old_path, &new_path).map_err(|error| {
-            format!("Failed to rename database from '{old_name}' to '{new_name}': {error}")
-        })?;
-
-        platform::restrict_to_owner(&new_path).map_err(|error| {
-            format!(
-                "Failed to set permissions on {}: {error}",
-                new_path.display()
-            )
-        })?;
-
-        for account in &mut registry.accounts {
-            if account == old_name {
-                *account = new_name.to_string();
-            }
-        }
-        registry.accounts.sort();
-
-        if registry.active.as_deref() == Some(old_name) {
-            registry.active = Some(new_name.to_string());
-        }
-
-        Self::save_registry(&registry)
-    }
-
-    pub fn delete_account(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut registry = Self::load_registry()?;
-
-        if !registry.accounts.iter().any(|account| account == name) {
-            return Err(format!("Account '{name}' not found.").into());
-        }
-
-        let db_path = Self::get_account_db_path(name)?;
-        if db_path.exists() {
-            fs::remove_file(&db_path).map_err(|error| {
-                format!("Failed to delete database for account '{name}': {error}")
-            })?;
-        }
-
-        registry.accounts.retain(|account| account != name);
-
-        let was_active = registry.active.as_deref() == Some(name);
-        if was_active {
-            registry.active = registry.accounts.first().cloned();
-        }
-
-        Self::save_registry(&registry)?;
-        Ok(was_active)
-    }
-
-    fn account_db_file_exists(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let db_path = Self::get_account_db_path(name)?;
-        Ok(fs::metadata(&db_path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0))
-    }
-
-    fn registry_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        Ok(Self::cortex_dir()?.join(ACCOUNTS_FILE))
-    }
-
-    fn load_registry() -> Result<AccountRegistry, Box<dyn std::error::Error>> {
-        let path = Self::registry_path()?;
-        if !path.exists() {
-            return Ok(AccountRegistry::default());
-        }
-
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("Failed to read accounts registry: {error}"))?;
-        if bytes.is_empty() {
-            return Ok(AccountRegistry::default());
-        }
-
-        let mut registry: AccountRegistry = decode_value(&bytes)
-            .map_err(|error| format!("Invalid accounts registry data: {error}"))?;
-
-        let mut valid_accounts = Vec::with_capacity(registry.accounts.len());
-        for name in registry.accounts {
-            if Self::account_db_file_exists(&name)? && !valid_accounts.contains(&name) {
-                valid_accounts.push(name);
-            }
-        }
-        valid_accounts.sort();
-        registry.accounts = valid_accounts;
-
-        let active_is_valid = registry
-            .active
-            .as_ref()
-            .is_some_and(|active| registry.accounts.contains(active));
-
-        if !active_is_valid {
-            registry.active = registry.accounts.first().cloned();
-        }
-
-        Ok(registry)
-    }
-
-    fn save_registry(registry: &AccountRegistry) -> Result<(), Box<dyn std::error::Error>> {
-        let path = Self::registry_path()?;
-        let bytes = encode_value(registry)?;
-        let directory = path.parent().unwrap_or(Path::new("."));
-
-        let mut temp = tempfile::NamedTempFile::new_in(directory).map_err(|error| {
-            format!(
-                "Failed to create temporary file in {}: {error}",
-                directory.display()
-            )
-        })?;
-
-        temp.write_all(&bytes).map_err(|error| {
-            format!(
-                "Failed to write accounts registry {}: {error}",
-                path.display()
-            )
-        })?;
-        temp.as_file().sync_all().map_err(|error| {
-            format!(
-                "Failed to sync accounts registry {}: {error}",
-                path.display()
-            )
-        })?;
-
-        platform::restrict_to_owner(temp.path())
-            .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
-        temp.persist(&path).map_err(|error| {
-            format!(
-                "Failed to save accounts registry {}: {}",
-                path.display(),
-                error.error
-            )
-        })?;
-
-        Ok(())
+        Accounts::file_name(name)
     }
 
     pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let active = Self::active_account()?
-            .ok_or("No accounts found. Create one with 'account create'.")?;
-        Self::get_account_db_path(&active)
+        let active =
+            Accounts::active()?.ok_or("No accounts found. Create one with 'account create'.")?;
+        Accounts::db_path(&active)
     }
 
     pub fn database_exists() -> Result<bool, Box<dyn std::error::Error>> {
-        let Some(active) = Self::active_account()? else {
+        let Some(active) = Accounts::active()? else {
             return Ok(false);
         };
-        Self::account_db_file_exists(&active)
+        Accounts::db_file_exists(&active)
     }
 
     pub fn legacy_database_present() -> Result<bool, Box<dyn std::error::Error>> {
-        let dir = Self::cortex_dir()?;
+        let dir = Accounts::cortex_dir()?;
         Ok(dir.join(LEGACY_DB_DIR).exists())
     }
 
@@ -839,77 +491,6 @@ impl Storage {
             .map_err(|error| format!("Failed to write database: {error}"))?;
         Ok(())
     }
-}
-
-fn is_reserved_name(name: &str) -> bool {
-    name.starts_with(RESERVED_PREFIX)
-}
-
-fn is_reserved_key(key: &[u8]) -> bool {
-    key.starts_with(RESERVED_PREFIX.as_bytes())
-}
-
-fn digest_records(
-    key: &[u8; 32],
-    records: &[(Vec<u8>, Vec<u8>)],
-    changes: &Changes,
-) -> blake3::Hash {
-    let mut hasher = blake3::Hasher::new_keyed(key);
-    let mut pending = changes.iter().peekable();
-
-    for (db_key, db_value) in records {
-        if is_reserved_key(db_key) {
-            continue;
-        }
-
-        while let Some((change_key, change_value)) =
-            pending.next_if(|(name, _)| name.as_slice() < db_key.as_slice())
-        {
-            feed_change(&mut hasher, change_key, change_value.as_deref());
-        }
-
-        match pending.next_if(|(name, _)| name.as_slice() == db_key.as_slice()) {
-            Some((change_key, change_value)) => {
-                feed_change(&mut hasher, change_key, change_value.as_deref());
-            }
-            None => feed_record(&mut hasher, db_key, db_value),
-        }
-    }
-
-    for (change_key, change_value) in pending {
-        feed_change(&mut hasher, change_key, change_value.as_deref());
-    }
-
-    hasher.finalize()
-}
-
-fn feed_record(hasher: &mut blake3::Hasher, name: &[u8], value: &[u8]) {
-    hasher.update(&(name.len() as u64).to_le_bytes());
-    hasher.update(name);
-    hasher.update(&(value.len() as u64).to_le_bytes());
-    hasher.update(value);
-}
-
-fn feed_change(hasher: &mut blake3::Hasher, name: &[u8], value: Option<&[u8]>) {
-    if let Some(value) = value {
-        feed_record(hasher, name, value);
-    }
-}
-
-fn snapshot_digest(key: &[u8; 32], entries: &[(Vec<u8>, Vec<u8>)]) -> blake3::Hash {
-    let mut records: Vec<&(Vec<u8>, Vec<u8>)> = entries
-        .iter()
-        .filter(|(name, _)| !is_reserved_key(name))
-        .collect();
-
-    records.sort_by(|left, right| left.0.cmp(&right.0));
-
-    let mut hasher = blake3::Hasher::new_keyed(key);
-    for (name, value) in records {
-        feed_record(&mut hasher, name, value);
-    }
-
-    hasher.finalize()
 }
 
 impl Drop for Storage {

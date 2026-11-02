@@ -1,5 +1,6 @@
 use crate::{
     core::{
+        accounts::Accounts,
         config::Config,
         crypto::Crypto,
         limits::{
@@ -23,14 +24,22 @@ struct VaultHeader {
 
 impl Gateway {
     pub fn login() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
-        let (storage, header) = Self::open_vault()?;
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let (name, storage, header) = Self::open_vault()?;
+        if let Some(crypto) = Self::restore_agent_key(&name, &header)? {
+            return Self::finish_login(storage, crypto);
+        }
 
+        let crypto = Self::prompt_master_key(&storage, &header)?;
         Self::finish_login(storage, crypto)
     }
 
     pub fn login_for_recovery() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
-        let (storage, header) = Self::open_vault()?;
+        let (name, storage, header) = Self::open_vault()?;
+        if let Some(crypto) = Self::restore_agent_key(&name, &header)? {
+            storage.bind_integrity(&crypto);
+            return Ok((storage, crypto));
+        }
+
         let crypto = Self::prompt_master_key(&storage, &header)?;
         storage.bind_integrity(&crypto);
         Ok((storage, crypto))
@@ -38,8 +47,11 @@ impl Gateway {
 
     pub fn login_account(name: &str) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_account_vault(name)?;
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        if let Some(crypto) = Self::restore_agent_key(name, &header)? {
+            return Self::finish_login(storage, crypto);
+        }
 
+        let crypto = Self::prompt_master_key(&storage, &header)?;
         Self::finish_login(storage, crypto)
     }
 
@@ -47,13 +59,22 @@ impl Gateway {
         name: &str,
     ) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_account_vault(name)?;
+        if let Some(crypto) = Self::restore_agent_key(name, &header)? {
+            storage.bind_integrity(&crypto);
+            return Ok((storage, crypto));
+        }
+
         let crypto = Self::prompt_master_key(&storage, &header)?;
         storage.bind_integrity(&crypto);
         Ok((storage, crypto))
     }
 
     pub fn login_with_session() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
-        let (storage, header) = Self::open_vault()?;
+        let (name, storage, header) = Self::open_vault()?;
+
+        if let Some(crypto) = Self::restore_agent_key(&name, &header)? {
+            return Self::finish_login(storage, crypto);
+        }
 
         if let Some(crypto) = Self::restore_session(&storage, &header)? {
             return Self::finish_login(storage, crypto);
@@ -69,9 +90,50 @@ impl Gateway {
         Ok((storage, crypto))
     }
 
+    pub fn login_for_mcp(name: &str) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
+        let (storage, header) = Self::open_account_vault_without_cache(name)?;
+
+        if let Some(crypto) = Self::restore_agent_key(name, &header)? {
+            return Self::finish_login(storage, crypto);
+        }
+
+        if Accounts::active()?.as_deref() == Some(name)
+            && let Some(mut key) = Session::load_session(&storage)?
+        {
+            let crypto = Crypto::from_key(key);
+            key.zeroize();
+            if crypto.matches_verification(&header.verification) {
+                return Self::finish_login(storage, crypto);
+            }
+        }
+
+        Err(format!(
+            "Account '{name}' is locked. Inform the user to unlock their vault in the terminal first, or use an [agent] account."
+        )
+        .into())
+    }
+
     pub fn login_storage_only() -> Result<Storage, Box<dyn std::error::Error>> {
         let (storage, _) = Self::login()?;
         Ok(storage)
+    }
+
+    fn restore_agent_key(
+        name: &str,
+        header: &VaultHeader,
+    ) -> Result<Option<Crypto>, Box<dyn std::error::Error>> {
+        let Some(mut key) = Accounts::get_agent_key(name)? else {
+            return Ok(None);
+        };
+
+        let crypto = Crypto::from_key(key);
+        key.zeroize();
+
+        if crypto.matches_verification(&header.verification) {
+            return Ok(Some(crypto));
+        }
+
+        Ok(None)
     }
 
     fn restore_session(
@@ -102,29 +164,47 @@ impl Gateway {
         Ok((storage, crypto))
     }
 
-    fn open_vault() -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
+    fn open_vault() -> Result<(String, Storage, VaultHeader), Box<dyn std::error::Error>> {
         Validation::storage_probe(true, "No accounts found. Create one with 'account create'.")?;
-        let storage = Storage::new()?;
-        Self::read_header(storage)
+        let active =
+            Accounts::active()?.ok_or("No accounts found. Create one with 'account create'.")?;
+        let storage = Storage::open_account(&active)?;
+        let (storage, header) = Self::read_header(storage, true)?;
+        Ok((active, storage, header))
     }
 
     fn open_account_vault(
         name: &str,
     ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
-        let (accounts, _) = Storage::list_accounts()?;
+        let (accounts, _) = Accounts::list()?;
         if accounts.is_empty() {
             return Err("No accounts found. Create one with 'account create'.".into());
         }
-        if !Storage::account_exists(name)? {
+        if !Accounts::exists(name)? {
             return Err(format!("Account '{name}' not found.").into());
         }
         let storage = Storage::open_account(name)?;
-        Self::read_header(storage)
+        Self::read_header(storage, true)
     }
 
-    fn read_header(storage: Storage) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
-        Config::clear_cache();
-        Config::load_from_db(&storage)?;
+    fn open_account_vault_without_cache(
+        name: &str,
+    ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
+        if !Accounts::exists(name)? {
+            return Err(format!("Account '{name}' not found.").into());
+        }
+        let storage = Storage::open_account(name)?;
+        Self::read_header(storage, false)
+    }
+
+    fn read_header(
+        storage: Storage,
+        refresh_config_cache: bool,
+    ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
+        if refresh_config_cache {
+            Config::clear_cache();
+            Config::load_from_db(&storage)?;
+        }
 
         let salt = storage
             .get_salt()?

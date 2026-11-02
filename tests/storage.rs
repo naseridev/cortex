@@ -1,6 +1,6 @@
 use cortex::core::crypto::Crypto;
 use cortex::core::dump;
-use cortex::core::storage::Storage;
+use cortex::core::storage::{McpPermission, Storage};
 use cortex::core::types::PasswordEntry;
 use std::fs;
 use std::path::PathBuf;
@@ -38,6 +38,42 @@ fn account_file_names_are_hashed_and_distinct() {
     assert_ne!(first, second);
     assert!(first.ends_with(".redb"));
     assert!(!first.contains("personal"));
+}
+
+#[test]
+fn mcp_permission_parses_three_digit_binary_flags() -> Result<(), String> {
+    let zero = McpPermission::parse("000")?;
+    assert!(zero.is_disabled());
+    assert!(!zero.can_account());
+    assert!(!zero.can_write());
+    assert!(!zero.can_read());
+
+    let read_only = McpPermission::parse("001")?;
+    assert!(!read_only.is_disabled());
+    assert!(!read_only.can_account());
+    assert!(!read_only.can_write());
+    assert!(read_only.can_read());
+
+    let write_only = McpPermission::parse("010")?;
+    assert!(!write_only.can_account());
+    assert!(write_only.can_write());
+    assert!(!write_only.can_read());
+
+    let account_only = McpPermission::parse("100")?;
+    assert!(account_only.can_account());
+    assert!(!account_only.can_write());
+    assert!(!account_only.can_read());
+
+    let full = McpPermission::parse("111")?;
+    assert!(full.can_account());
+    assert!(full.can_write());
+    assert!(full.can_read());
+    assert_eq!(full.as_str(), "111");
+
+    assert!(McpPermission::parse("002").is_err());
+    assert!(McpPermission::parse("11").is_err());
+    assert!(McpPermission::parse("1111").is_err());
+    Ok(())
 }
 
 #[test]

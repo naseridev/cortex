@@ -1,5 +1,6 @@
 use crate::{
     core::{
+        accounts::Accounts,
         crypto::Crypto,
         password::Password,
         types::{PasswordEntry, decode_secret_text},
@@ -39,6 +40,13 @@ impl Reset {
         let updated_entries = Self::reencrypt_all(&plain_entries, &new_crypto)?;
 
         storage.atomic_reset(&updated_entries, &new_crypto, &new_salt)?;
+
+        if let Some(active) = Accounts::active()?
+            && Accounts::is_agent(&active)?
+        {
+            Accounts::update_agent_key(&active, new_crypto.key())?;
+        }
+
         Session::clear_session()?;
 
         println!("Master password reset successfully.");

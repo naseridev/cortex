@@ -10,6 +10,7 @@ pub mod get;
 pub mod import;
 pub mod list;
 pub mod lock;
+pub mod mcp;
 pub mod pass;
 pub mod reset;
 pub mod restore;

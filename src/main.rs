@@ -3,10 +3,10 @@ use cortex::{
     commands::{
         account::Account, config::ConfigCmd, create::Create, delete::Delete, dump::Dump,
         edit::Edit, export::Export, find::Find, get::Get, import::Import, list::List, lock::Lock,
-        pass::Pass, reset::Reset, restore::Restore, tag::Tag,
+        mcp::Mcp, pass::Pass, reset::Reset, restore::Restore, tag::Tag,
     },
     core::{password::PasswordCharset, tags::TagValidator},
-    ui::cli::{AccountAction, Cli, Commands, ConfigAction, TagAction},
+    ui::cli::{AccountAction, Cli, Commands, ConfigAction, McpAction, TagAction},
 };
 use std::process::ExitCode;
 
@@ -25,6 +25,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Account { action } => run_account(action),
+        Commands::Mcp { action } => run_mcp(action),
         Commands::Create { name, tags } => Create::execute(&name, tags),
         Commands::Get { name, show } => Get::execute(&name, show),
         Commands::List { show_tags } => List::execute(show_tags),
@@ -75,6 +76,17 @@ fn run_account(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> 
         AccountAction::Edit { name, new_name } => Account::edit(name, new_name),
         AccountAction::Delete { name } => Account::delete(name),
         AccountAction::Switch { name } => Account::switch(name),
+    }
+}
+
+fn run_mcp(action: McpAction) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        McpAction::Init => Mcp::init(),
+        McpAction::Serve => Mcp::serve(),
+        McpAction::Permission { mode } => Mcp::permission(mode),
+        McpAction::Sandbox { state } => Mcp::sandbox(state),
+        McpAction::Status => Mcp::status(),
+        McpAction::Remove { purge_accounts } => Mcp::remove(purge_accounts),
     }
 }
 

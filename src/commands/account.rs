@@ -1,6 +1,6 @@
 use crate::{
     core::{
-        config::Config, crypto::Crypto, password::Password, storage::Storage,
+        accounts::Accounts, config::Config, crypto::Crypto, password::Password, storage::Storage,
         validation::Validation,
     },
     modules::{gateway::Gateway, security::Security, session::Session},
@@ -14,7 +14,7 @@ impl Account {
         let account_name = Self::resolve_name(name, "Account name: ")?;
         Validation::check_account_name(&account_name)?;
 
-        if Storage::account_exists(&account_name)? {
+        if Accounts::exists(&account_name)? {
             return Err(format!(
                 "Account '{account_name}' already exists. Choose a different name."
             )
@@ -35,7 +35,7 @@ impl Account {
         storage.init_db(&crypto, &salt)?;
         drop(storage);
 
-        Storage::register_account(&account_name)?;
+        Accounts::register(&account_name)?;
         Config::clear_cache();
 
         if let Err(error) = Session::save_session(crypto.key()) {
@@ -50,7 +50,7 @@ impl Account {
     }
 
     pub fn list() -> Result<(), Box<dyn std::error::Error>> {
-        let (accounts, active) = Storage::list_accounts()?;
+        let (accounts, active) = Accounts::list()?;
 
         if accounts.is_empty() {
             println!("No accounts found. Create one with 'account create'.");
@@ -60,10 +60,13 @@ impl Account {
         println!("\nAccounts:");
         for name in accounts {
             let printable = Validation::printable(&name);
+            let is_agent = Accounts::is_agent(&name)?;
+            let tag = if is_agent { " [agent]" } else { "" };
+
             if active.as_deref() == Some(name.as_str()) {
-                println!("  * {printable} (active)");
+                println!("  * {printable}{tag} (active)");
             } else {
-                println!("    {printable}");
+                println!("    {printable}{tag}");
             }
         }
 
@@ -74,7 +77,7 @@ impl Account {
         name: Option<String>,
         new_name: Option<String>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (accounts, _) = Storage::list_accounts()?;
+        let (accounts, _) = Accounts::list()?;
         if accounts.is_empty() {
             return Err("No accounts found. Create one with 'account create'.".into());
         }
@@ -82,7 +85,7 @@ impl Account {
         let current_name = Self::resolve_name(name, "Account name: ")?;
         Validation::check_account_name(&current_name)?;
 
-        if !Storage::account_exists(&current_name)? {
+        if !Accounts::exists(&current_name)? {
             return Err(format!("Account '{current_name}' not found.").into());
         }
 
@@ -97,21 +100,21 @@ impl Account {
             return Ok(());
         }
 
-        if Storage::account_exists(&updated_name)? {
+        if Accounts::exists(&updated_name)? {
             return Err(format!(
                 "Account '{updated_name}' already exists. Choose a different name."
             )
             .into());
         }
 
-        Storage::rename_account(&current_name, &updated_name)?;
+        Accounts::rename(&current_name, &updated_name)?;
         println!("Renamed account '{current_name}' to '{updated_name}'.");
 
         Ok(())
     }
 
     pub fn delete(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        let (accounts, _) = Storage::list_accounts()?;
+        let (accounts, _) = Accounts::list()?;
         if accounts.is_empty() {
             return Err("No accounts found. Create one with 'account create'.".into());
         }
@@ -119,7 +122,7 @@ impl Account {
         let account_name = Self::resolve_name(name, "Account name: ")?;
         Validation::check_account_name(&account_name)?;
 
-        if !Storage::account_exists(&account_name)? {
+        if !Accounts::exists(&account_name)? {
             return Err(format!("Account '{account_name}' not found.").into());
         }
 
@@ -131,7 +134,7 @@ impl Account {
         );
         Security::confirmation(&warning_message)?;
 
-        let was_active = Storage::delete_account(&account_name)?;
+        let was_active = Accounts::delete(&account_name)?;
         if was_active {
             Session::clear_session()?;
             Config::clear_cache();
@@ -142,7 +145,7 @@ impl Account {
     }
 
     pub fn switch(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        let (accounts, _) = Storage::list_accounts()?;
+        let (accounts, _) = Accounts::list()?;
         if accounts.is_empty() {
             return Err("No accounts found. Create one with 'account create'.".into());
         }
@@ -150,16 +153,16 @@ impl Account {
         let account_name = Self::resolve_name(name, "Account name: ")?;
         Validation::check_account_name(&account_name)?;
 
-        if !Storage::account_exists(&account_name)? {
+        if !Accounts::exists(&account_name)? {
             return Err(format!("Account '{account_name}' not found.").into());
         }
 
-        if Storage::active_account()?.as_deref() == Some(account_name.as_str()) {
+        if Accounts::active()?.as_deref() == Some(account_name.as_str()) {
             println!("Account '{account_name}' is already active.");
             return Ok(());
         }
 
-        Storage::switch_account(&account_name)?;
+        Accounts::switch(&account_name)?;
         Session::clear_session()?;
         Config::clear_cache();
 

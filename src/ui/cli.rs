@@ -23,6 +23,12 @@ pub enum Commands {
         action: AccountAction,
     },
 
+    #[command(about = "Manage Model Context Protocol (MCP) server and agent permissions")]
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+
     #[command(about = "Create a new password entry")]
     Create {
         #[arg(help = "Name/identifier for the password entry")]
@@ -165,6 +171,41 @@ pub enum AccountAction {
     Switch {
         #[arg(help = "Name of the account to switch to")]
         name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum McpAction {
+    #[command(about = "Initialize MCP server configuration and agent workspace")]
+    Init,
+
+    #[command(about = "Start the MCP JSON-RPC server over stdio")]
+    Serve,
+
+    #[command(
+        about = "Show or set 3-digit binary MCP permission (hundreds: account create, tens: write/delete, ones: read)"
+    )]
+    Permission {
+        #[arg(help = "3-digit binary mode from 000 to 111 (omit to view current permission)")]
+        mode: Option<String>,
+    },
+
+    #[command(about = "Enable or disable agent account isolation (on/off)")]
+    Sandbox {
+        #[arg(help = "Sandbox state: 'on' or 'off' (omit to view current state)")]
+        state: Option<String>,
+    },
+
+    #[command(about = "Show current MCP status, permission, sandbox state, and agent accounts")]
+    Status,
+
+    #[command(about = "Remove MCP configuration")]
+    Remove {
+        #[arg(
+            long = "purge-accounts",
+            help = "Also permanently delete all [agent] accounts"
+        )]
+        purge_accounts: bool,
     },
 }
 

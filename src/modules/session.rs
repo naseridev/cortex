@@ -1,23 +1,13 @@
-use crate::core::{config::Config, time::Time};
+use crate::core::{config::Config, storage::Storage, time::Time};
 use keyring::Entry;
-use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 const SERVICE_NAME: &str = "cortex";
 const ACCOUNT_NAME: &str = "vault-session";
 const MAX_SESSION_AGE: u64 = 86400;
-
-#[derive(Serialize, Deserialize)]
-struct SessionData {
-    timestamp: u64,
-    key: [u8; 32],
-}
-
-impl Drop for SessionData {
-    fn drop(&mut self) {
-        self.key.zeroize();
-    }
-}
+const TIMESTAMP_BYTES: usize = 8;
+const KEY_BYTES: usize = 32;
+const RECORD_BYTES: usize = TIMESTAMP_BYTES + KEY_BYTES;
 
 pub struct Session;
 
@@ -27,39 +17,44 @@ impl Session {
     }
 
     pub fn save_session(vault_key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error>> {
-        let data = SessionData {
-            timestamp: Time::current_timestamp(),
-            key: *vault_key,
-        };
-        let mut serialized = bincode::serialize(&data)?;
-        let stored = Self::entry()?.set_secret(&serialized);
-        serialized.zeroize();
+        let mut record = [0u8; RECORD_BYTES];
+        record[..TIMESTAMP_BYTES].copy_from_slice(&Time::current_timestamp().to_le_bytes());
+        record[TIMESTAMP_BYTES..].copy_from_slice(vault_key);
+        let stored = Self::entry()?.set_secret(&record);
+        record.zeroize();
         stored?;
         Ok(())
     }
 
-    pub fn load_session() -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
+    pub fn load_session(storage: &Storage) -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
         let Ok(entry) = Self::entry() else {
             return Ok(None);
         };
-        let Ok(mut serialized) = entry.get_secret() else {
+        let Ok(mut record) = entry.get_secret() else {
             return Ok(None);
         };
-        let decoded = bincode::deserialize::<SessionData>(&serialized);
-        serialized.zeroize();
-        let Ok(session) = decoded else {
-            Self::clear_session()?;
-            return Ok(None);
-        };
-
-        let config = Config::load()?;
-        let elapsed = Time::current_timestamp().saturating_sub(session.timestamp);
-        if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
+        if record.len() != RECORD_BYTES {
+            record.zeroize();
             Self::clear_session()?;
             return Ok(None);
         }
 
-        Ok(Some(session.key))
+        let mut timestamp_bytes = [0u8; TIMESTAMP_BYTES];
+        timestamp_bytes.copy_from_slice(&record[..TIMESTAMP_BYTES]);
+        let timestamp = u64::from_le_bytes(timestamp_bytes);
+        let mut key = [0u8; KEY_BYTES];
+        key.copy_from_slice(&record[TIMESTAMP_BYTES..]);
+        record.zeroize();
+
+        let config = Config::load_from_db(storage)?;
+        let elapsed = Time::current_timestamp().saturating_sub(timestamp);
+        if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
+            key.zeroize();
+            Self::clear_session()?;
+            return Ok(None);
+        }
+
+        Ok(Some(key))
     }
 
     pub fn clear_session() -> Result<(), Box<dyn std::error::Error>> {

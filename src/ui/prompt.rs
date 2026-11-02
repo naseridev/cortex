@@ -1,6 +1,6 @@
-use crate::core::{limits::MAX_INPUT_LINE_BYTES, types::SecureString};
+use crate::core::limits::MAX_INPUT_LINE_BYTES;
 use std::io::{self, BufRead, Read, Write};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const MAX_PASSWORD_BYTES: usize = 128;
 const DEFAULT_TEXT_LIMIT: usize = 128;
@@ -8,7 +8,7 @@ const DEFAULT_TEXT_LIMIT: usize = 128;
 pub struct UserPrompt;
 
 impl UserPrompt {
-    pub fn password(prompt: &str) -> Result<SecureString, Box<dyn std::error::Error>> {
+    pub fn password(prompt: &str) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
         match Self::optional_password(prompt)? {
             Some(password) => Ok(password),
             None => Err("Empty password not allowed".into()),
@@ -17,8 +17,8 @@ impl UserPrompt {
 
     pub fn optional_password(
         prompt: &str,
-    ) -> Result<Option<SecureString>, Box<dyn std::error::Error>> {
-        let secret = SecureString::new(rpassword::prompt_password(prompt)?);
+    ) -> Result<Option<Zeroizing<String>>, Box<dyn std::error::Error>> {
+        let secret = Zeroizing::new(rpassword::prompt_password(prompt)?);
 
         if secret.as_str().is_empty() {
             return Ok(None);

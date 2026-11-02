@@ -1,14 +1,14 @@
 use crate::{
     core::config::Config,
     modules::{gateway::Gateway, session::Session},
-    utils::security::Security,
+    modules::security::Security,
 };
 
 pub struct Purge;
 
 impl Purge {
     pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
-        let storage = Gateway::login_storage_only()?;
+        let (storage, _) = Gateway::login_for_recovery()?;
 
         let warning_message = "This will permanently delete all stored passwords!";
         Security::confirmation(warning_message)?;

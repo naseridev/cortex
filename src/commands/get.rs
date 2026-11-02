@@ -1,7 +1,9 @@
 use crate::{
-    core::types::{SecureString, decode_secret_text},
+    core::types::decode_secret_text,
+    core::validation::Validation,
     modules::{clipboard, gateway::Gateway},
 };
+use zeroize::Zeroizing;
 
 const CLIPBOARD_SECONDS: u64 = 30;
 
@@ -14,16 +16,16 @@ impl Get {
         match storage.get_password(name)? {
             Some(entry) => {
                 let decrypted = crypto.decrypt_entry(name, &entry)?;
-                let password = SecureString::new(decode_secret_text(decrypted)?);
+                let password = Zeroizing::new(decode_secret_text(decrypted)?);
                 let description = crypto.decrypt_description(name, &entry)?;
                 let tags = crypto.decrypt_tags(name, &entry)?;
 
                 println!();
                 if show {
-                    println!("{name}: {}", password.as_str());
+                    println!("{}: {}", Validation::printable(name), password.as_str());
                 }
                 if let Some(desc) = description {
-                    println!("Description: {desc}");
+                    println!("Description: {}", Validation::printable(&desc));
                 }
                 if !tags.is_empty() {
                     println!("Tags: {}", tags.join(", "));

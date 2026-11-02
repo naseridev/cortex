@@ -1,3 +1,4 @@
+use crate::core::validation::Validation;
 use crate::modules::gateway::Gateway;
 
 pub struct List;
@@ -35,9 +36,9 @@ impl List {
         } else {
             for (name, description, tags) in entries {
                 println!();
-                println!("Entry: {name}");
+                println!("Entry: {}", Validation::printable(&name));
                 if let Some(desc) = &description {
-                    println!("Description: {desc}");
+                    println!("Description: {}", Validation::printable(desc));
                 }
                 if show_tags && !tags.is_empty() {
                     println!("Tags: {}", tags.join(", "));

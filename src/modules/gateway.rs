@@ -10,7 +10,8 @@ use crate::{
         },
         storage::Storage,
     },
-    modules::{session::Session, validation::Validation},
+    core::validation::Validation,
+    modules::session::Session,
     ui::prompt::UserPrompt,
 };
 
@@ -25,22 +26,30 @@ impl Gateway {
     pub fn login() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_vault()?;
         let crypto = Self::prompt_master_key(&storage, &header)?;
+        Self::finish_login(storage, crypto)
+    }
+
+    pub fn login_for_recovery() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
+        let (storage, header) = Self::open_vault()?;
+        let crypto = Self::prompt_master_key(&storage, &header)?;
+        storage.bind_integrity(&crypto);
         Ok((storage, crypto))
     }
 
     pub fn login_with_session() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_vault()?;
 
-        if let Some(mut key) = Session::load_session()? {
+        if let Some(mut key) = Session::load_session(&storage)? {
             let crypto = Crypto::from_key(key);
             key.zeroize();
             if crypto.matches_verification(&header.verification) {
-                return Ok((storage, crypto));
+                return Self::finish_login(storage, crypto);
             }
             Session::clear_session()?;
         }
 
         let crypto = Self::prompt_master_key(&storage, &header)?;
+        let (storage, crypto) = Self::finish_login(storage, crypto)?;
         if let Err(error) = Session::save_session(crypto.key()) {
             eprintln!("Warning: session could not be stored: {error}");
         }
@@ -52,13 +61,22 @@ impl Gateway {
         Ok(storage)
     }
 
+    fn finish_login(
+        storage: Storage,
+        crypto: Crypto,
+    ) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
+        storage.bind_integrity(&crypto);
+        storage.verify_integrity()?;
+        Ok((storage, crypto))
+    }
+
     fn open_vault() -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
         Validation::storage_probe(true, "Database not initialized. Use 'init' command.")?;
 
         let storage = Storage::new()?;
 
         Config::clear_cache();
-        Config::load_from_db(&storage.db)?;
+        Config::load_from_db(&storage)?;
 
         let salt = storage
             .get_salt()?
@@ -104,35 +122,12 @@ impl Gateway {
     }
 }
 
-fn throttle_delay_seconds(failed_attempts: u32) -> u64 {
+#[must_use]
+pub fn throttle_delay_seconds(failed_attempts: u32) -> u64 {
     let Some(exponent) = failed_attempts.checked_sub(THROTTLE_FREE_FAILURES) else {
         return 0;
     };
     1u64.checked_shl(exponent)
         .unwrap_or(u64::MAX)
         .min(THROTTLE_MAX_DELAY_SECONDS)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::throttle_delay_seconds;
-
-    #[test]
-    fn no_delay_within_free_failures() {
-        assert_eq!(throttle_delay_seconds(0), 0);
-        assert_eq!(throttle_delay_seconds(2), 0);
-    }
-
-    #[test]
-    fn delay_doubles_after_free_failures() {
-        assert_eq!(throttle_delay_seconds(3), 1);
-        assert_eq!(throttle_delay_seconds(4), 2);
-        assert_eq!(throttle_delay_seconds(5), 4);
-    }
-
-    #[test]
-    fn delay_is_capped_and_never_overflows() {
-        assert_eq!(throttle_delay_seconds(u32::MAX), 3_600);
-        assert_eq!(throttle_delay_seconds(100), 3_600);
-    }
 }

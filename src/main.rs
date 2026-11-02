@@ -1,11 +1,11 @@
 use clap::Parser;
 use cortex::{
     commands::{
-        config::ConfigCmd, create::Create, delete::Delete, edit::Edit, export::Export, find::Find,
-        get::Get, import::Import, init::Init, list::List, lock::Lock, pass::Pass, purge::Purge,
-        reset::Reset, tag::Tag,
+        config::ConfigCmd, create::Create, delete::Delete, dump::Dump, edit::Edit, export::Export,
+        find::Find, get::Get, import::Import, init::Init, list::List, lock::Lock, pass::Pass,
+        purge::Purge, reset::Reset, restore::Restore, tag::Tag,
     },
-    modules::{password::PasswordCharset, tags::TagValidator},
+    core::{password::PasswordCharset, tags::TagValidator},
     ui::cli::{Cli, Commands, ConfigAction, TagAction},
 };
 use std::process::ExitCode;
@@ -35,9 +35,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ignore_case,
             names_only,
         } => Find::execute(&pattern, ignore_case, names_only),
-        Commands::Export { csv } => Export::execute(csv),
+        Commands::Export => Export::execute(),
         Commands::Import { file, overwrite } => Import::execute(&file, overwrite),
         Commands::Reset => Reset::execute(),
+        Commands::Dump => Dump::execute(),
+        Commands::Restore { file } => Restore::execute(&file),
         Commands::Purge => Purge::execute(),
         Commands::Lock => Lock::execute(),
         Commands::Config { action } => match action {

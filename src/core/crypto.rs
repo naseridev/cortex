@@ -1,10 +1,10 @@
 use crate::core::time::Time;
-use crate::core::types::{PasswordEntry, SecureString, decode_secret_text};
+use crate::core::types::{PasswordEntry, decode_secret_text};
 use argon2::{Algorithm, Argon2, Params, Version};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead, aead::Payload};
-use rand::{RngCore, rngs::OsRng};
-use zeroize::Zeroize;
+use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, Zeroizing};
 
 const KDF_VERSION_ARGON2: u8 = 4;
 const ARGON2_MEMORY_KIB: u32 = 64 * 1024;
@@ -16,6 +16,9 @@ const FIELD_DESCRIPTION: &str = "description";
 const FIELD_TAGS: &str = "tags";
 const BLOB_NAME: &str = "cortex_export";
 const BLOB_FIELD: &str = "payload";
+const DUMP_NAME: &str = "cortex_dump";
+const DUMP_FIELD: &str = "snapshot";
+const INTEGRITY_CONTEXT: &str = "cortex vault integrity key v1";
 
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
@@ -30,15 +33,15 @@ impl Drop for Crypto {
 
 impl Crypto {
     pub fn create(
-        master_password: &SecureString,
+        master_password: &Zeroizing<String>,
     ) -> Result<(Self, Vec<u8>), Box<dyn std::error::Error>> {
-        let salt = Self::generate_salt();
+        let salt = Self::generate_salt()?;
         let crypto = Self::from_argon2(master_password.as_bytes(), &salt)?;
         Ok((crypto, Self::encode_salt(&salt)))
     }
 
     pub fn open(
-        master_password: &SecureString,
+        master_password: &Zeroizing<String>,
         salt_blob: &[u8],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match salt_blob {
@@ -69,16 +72,14 @@ impl Crypto {
     }
 
     #[must_use]
+    pub fn integrity_key(&self) -> [u8; 32] {
+        blake3::derive_key(INTEGRITY_CONTEXT, &self.key)
+    }
+
+    #[must_use]
     pub fn matches_verification(&self, verification_data: &[u8]) -> bool {
         let computed = self.verification();
-        if computed.len() != verification_data.len() {
-            return false;
-        }
-        let mut diff = 0u8;
-        for (left, right) in computed.iter().zip(verification_data.iter()) {
-            diff |= left ^ right;
-        }
-        diff == 0
+        bool::from(computed.as_slice().ct_eq(verification_data))
     }
 
     pub fn create_entry(
@@ -172,11 +173,11 @@ impl Crypto {
         }
     }
 
-    #[must_use]
-    pub fn generate_salt() -> [u8; 32] {
+    pub fn generate_salt() -> Result<[u8; 32], Box<dyn std::error::Error>> {
         let mut salt = [0u8; 32];
-        OsRng.fill_bytes(&mut salt);
-        salt
+        getrandom::fill(&mut salt)
+            .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
+        Ok(salt)
     }
 
     #[must_use]
@@ -220,6 +221,22 @@ impl Crypto {
             .map_err(|error| format!("Blob decryption failed: {error:?}").into())
     }
 
+    pub fn seal_dump(
+        &self,
+        plaintext: &[u8],
+    ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
+        self.seal(DUMP_NAME, DUMP_FIELD, plaintext)
+    }
+
+    pub fn open_dump(
+        &self,
+        nonce: &[u8; 12],
+        ciphertext: &[u8],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        self.open_field(DUMP_NAME, DUMP_FIELD, nonce, ciphertext)
+            .map_err(|error| format!("Dump decryption failed: {error:?}").into())
+    }
+
     fn seal(
         &self,
         name: &str,
@@ -227,8 +244,9 @@ impl Crypto {
         plaintext: &[u8],
     ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
         let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        getrandom::fill(&mut nonce_bytes)
+            .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
+        let nonce = &Nonce::from(nonce_bytes);
         let aad = associated_data(name, field);
         let encrypted = self
             .cipher
@@ -250,7 +268,7 @@ impl Crypto {
         nonce_bytes: &[u8; 12],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, chacha20poly1305::aead::Error> {
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = &Nonce::from(*nonce_bytes);
         let aad = associated_data(name, field);
         self.cipher.decrypt(
             nonce,

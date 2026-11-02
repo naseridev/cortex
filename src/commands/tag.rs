@@ -1,8 +1,10 @@
 use crate::{
-    core::types::{SecureString, decode_secret_text},
-    modules::{gateway::Gateway, tags::TagValidator},
+    core::types::decode_secret_text,
+    core::tags::TagValidator,
+    modules::gateway::Gateway,
 };
 use std::collections::{HashMap, HashSet};
+use zeroize::Zeroizing;
 
 pub struct Tag;
 
@@ -79,7 +81,7 @@ impl Tag {
         TagValidator::validate(&normalized_final)?;
 
         let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
-        let secure_password = SecureString::new(decode_secret_text(decrypted_bytes)?);
+        let secure_password = Zeroizing::new(decode_secret_text(decrypted_bytes)?);
         let description = crypto.decrypt_description(name, &entry)?;
 
         let new_entry = crypto.create_entry(
@@ -126,7 +128,7 @@ impl Tag {
         }
 
         let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
-        let secure_password = SecureString::new(decode_secret_text(decrypted_bytes)?);
+        let secure_password = Zeroizing::new(decode_secret_text(decrypted_bytes)?);
         let description = crypto.decrypt_description(name, &entry)?;
 
         let remaining_tags = if existing_tags.is_empty() {

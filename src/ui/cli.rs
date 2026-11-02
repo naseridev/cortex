@@ -96,14 +96,8 @@ pub enum Commands {
         special: bool,
     },
 
-    #[command(about = "Export all passwords to an encrypted file, or to plaintext CSV with --csv")]
-    Export {
-        #[arg(
-            long,
-            help = "Write a plaintext CSV file instead of an encrypted export"
-        )]
-        csv: bool,
-    },
+    #[command(about = "Export all passwords to a plaintext CSV file in the current directory")]
+    Export,
 
     #[command(about = "Import passwords from an encrypted export or a CSV export")]
     Import {
@@ -119,6 +113,15 @@ pub enum Commands {
 
     #[command(about = "Reset the master password")]
     Reset,
+
+    #[command(about = "Write an encrypted dump of the database to the current directory")]
+    Dump,
+
+    #[command(about = "Restore the database from a dump file, replacing its contents")]
+    Restore {
+        #[arg(help = "Path to a dump file created by the dump command")]
+        file: String,
+    },
 
     #[command(about = "Manage configuration settings")]
     Config {

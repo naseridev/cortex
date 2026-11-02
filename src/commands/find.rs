@@ -1,3 +1,4 @@
+use crate::core::validation::Validation;
 use crate::modules::gateway::Gateway;
 use regex::RegexBuilder;
 
@@ -82,7 +83,7 @@ impl Find {
 
         for (name, description, tags, name_match, desc_match, tag_match) in results.iter().take(20)
         {
-            println!("Entry: {name}");
+            println!("Entry: {}", Validation::printable(name));
 
             let mut matches = Vec::new();
             if *name_match {
@@ -107,7 +108,7 @@ impl Find {
                 } else {
                     desc.clone()
                 };
-                println!("  Description: {display_desc}");
+                println!("  Description: {}", Validation::printable(&display_desc));
             }
 
             if !tags.is_empty() {

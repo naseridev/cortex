@@ -1,10 +1,10 @@
 use crate::{
-    core::types::{SecureString, decode_secret_text},
-    modules::{gateway::Gateway, password::Password, tags::TagValidator},
+    core::{limits::MIN_ACCOUNT_PASSWORD_LENGTH, types::decode_secret_text},
+    core::{password::Password, tags::TagValidator, validation::Validation},
+    modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
-
-const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
+use zeroize::Zeroizing;
 
 pub struct Edit;
 
@@ -21,15 +21,17 @@ impl Edit {
             .ok_or_else(|| format!("Account '{name}' not found."))?;
 
         let decrypted = crypto.decrypt_entry(name, &entry)?;
-        let current_password = SecureString::new(decode_secret_text(decrypted)?);
-        let current_desc = crypto.decrypt_description(name, &entry)?;
+        let current_password = Zeroizing::new(decode_secret_text(decrypted)?);
+        let current_desc = crypto
+            .decrypt_description(name, &entry)?
+            .map(Zeroizing::new);
         let current_tags = crypto.decrypt_tags(name, &entry)?;
 
         let new_password_input =
             UserPrompt::optional_password("New password (Enter to keep current): ")?;
 
         let new_password = match new_password_input {
-            None => SecureString::new(current_password.as_str().to_string()),
+            None => Zeroizing::new(current_password.as_str().to_string()),
             Some(input_pass) => {
                 Password::length_check(input_pass.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
                 let confirm_password = UserPrompt::password("Confirm new password: ")?;
@@ -38,12 +40,15 @@ impl Edit {
             }
         };
 
-        let description_input =
-            UserPrompt::text_with_limit("New description (Enter to keep current): ", 500)?;
+        let description_input = Zeroizing::new(UserPrompt::text_with_limit(
+            "New description (Enter to keep current): ",
+            500,
+        )?);
 
-        let description = if description_input.is_empty() {
-            current_desc.as_deref()
+        let description = if description_input.as_str().is_empty() {
+            current_desc.as_ref().map(|value| value.as_str())
         } else {
+            Validation::check_description_text(description_input.as_str())?;
             Some(description_input.as_str())
         };
 
@@ -69,7 +74,7 @@ impl Edit {
         };
 
         let no_changes = new_password.as_str() == current_password.as_str()
-            && description == current_desc.as_deref()
+            && description == current_desc.as_ref().map(|value| value.as_str())
             && tag_list.as_ref() == current_tags_opt;
 
         if no_changes {

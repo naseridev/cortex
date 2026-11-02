@@ -1,4 +1,6 @@
-use rand::{Rng, rngs::OsRng};
+use rand::seq::{IndexedRandom, SliceRandom};
+
+const SPECIAL_CHARACTERS: &str = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
 #[derive(Clone, Copy)]
 pub struct PasswordCharset(u8);
@@ -81,7 +83,7 @@ impl Password {
         }
 
         if use_special {
-            let specs: Vec<char> = "!@#$%^&*()_+-=[]{}|;:,.<>?".chars().collect();
+            let specs: Vec<char> = SPECIAL_CHARACTERS.chars().collect();
             required_chars.push(Self::pick_random_char(&specs)?);
             pool.extend_from_slice(&specs);
         }
@@ -94,7 +96,7 @@ impl Password {
             return Err("Password length too short for required character types".to_string());
         }
 
-        let mut rng = OsRng;
+        let mut rng = rand::rng();
         let mut password_chars = Vec::with_capacity(length);
 
         for &ch in &required_chars {
@@ -102,14 +104,11 @@ impl Password {
         }
 
         for _ in required_chars.len()..length {
-            let idx = rng.gen_range(0..pool.len());
-            password_chars.push(pool[idx]);
+            let &ch = pool.choose(&mut rng).ok_or("No character types selected")?;
+            password_chars.push(ch);
         }
 
-        for i in (1..password_chars.len()).rev() {
-            let j = rng.gen_range(0..=i);
-            password_chars.swap(i, j);
-        }
+        password_chars.shuffle(&mut rng);
 
         Ok(password_chars.into_iter().collect())
     }
@@ -119,9 +118,11 @@ impl Password {
             return Err("Empty charset".to_string());
         }
 
-        let mut rng = OsRng;
-        let idx = rng.gen_range(0..chars.len());
-        Ok(chars[idx])
+        let mut rng = rand::rng();
+        chars
+            .choose(&mut rng)
+            .copied()
+            .ok_or_else(|| "Empty charset".to_string())
     }
 
     pub fn security_check(password: &str) -> Result<(), String> {
@@ -143,10 +144,7 @@ impl Password {
             missing.push("digit");
         }
 
-        if !password
-            .chars()
-            .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c))
-        {
+        if !password.chars().any(|c| SPECIAL_CHARACTERS.contains(c)) {
             missing.push("special character");
         }
 
@@ -183,42 +181,18 @@ impl Password {
     }
 
     fn in_desc_found(password: &str, description: &str) -> bool {
-        let password_lower = password.to_lowercase();
+        let password_chars: Vec<char> = password.to_lowercase().chars().collect();
         let description_lower = description.to_lowercase();
 
-        let password_chars: Vec<char> = password_lower.chars().collect();
-        let description_chars: Vec<char> = description_lower.chars().collect();
-
-        if password_chars.len() < 3 || description_chars.is_empty() {
+        if password_chars.len() < 3 || description_lower.chars().count() < 3 {
             return false;
         }
 
-        if description_lower.contains(&password_lower) {
-            return true;
-        }
-
-        if description_chars.len() < 3 {
-            return false;
-        }
-
-        let min_window = (password_chars.len() / 2).max(3);
-
-        for window_size in (min_window..=password_chars.len()).rev() {
-            if window_size > description_chars.len() {
-                continue;
-            }
-
-            for window in password_chars.windows(window_size) {
-                if description_chars
-                    .windows(window_size)
-                    .any(|desc_window| desc_window == window)
-                {
-                    return true;
-                }
-            }
-        }
-
-        false
+        let window_size = (password_chars.len() / 2).max(3);
+        password_chars.windows(window_size).any(|window| {
+            let fragment: String = window.iter().collect();
+            description_lower.contains(&fragment)
+        })
     }
 
     pub fn in_desc_check(

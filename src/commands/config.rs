@@ -25,9 +25,9 @@ impl ConfigCmd {
         }
 
         let storage = Gateway::login_storage_only()?;
-        let mut config = Config::load_from_db(&storage.db)?;
+        let mut config = Config::load_from_db(&storage)?;
         config.session_timeout_seconds = seconds;
-        config.save_to_db(&storage.db)?;
+        config.save_to_db(&storage)?;
 
         println!(
             "Session timeout set to {} seconds ({} minutes)",

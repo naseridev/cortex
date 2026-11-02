@@ -1,10 +1,14 @@
+use crate::core::limits::MAX_ENTRIES;
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use zeroize::Zeroize;
 
 #[derive(Serialize, Deserialize)]
 pub struct ExportData {
     pub version: String,
     pub timestamp: u64,
+    #[serde(deserialize_with = "deserialize_bounded_entries")]
     pub entries: Vec<ExportEntry>,
 }
 
@@ -16,6 +20,15 @@ pub struct ExportEntry {
     pub tags: Vec<String>,
 }
 
+impl Drop for ExportEntry {
+    fn drop(&mut self) {
+        self.password.zeroize();
+        if let Some(description) = self.description.as_mut() {
+            description.zeroize();
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PasswordEntry {
     pub encrypted_password: Vec<u8>,
@@ -25,31 +38,6 @@ pub struct PasswordEntry {
     pub desc_nonce: Option<[u8; 12]>,
     pub tags_nonce: Option<[u8; 12]>,
     pub timestamp: u64,
-}
-
-pub struct SecureString(String);
-
-impl Drop for SecureString {
-    fn drop(&mut self) {
-        self.0.zeroize();
-    }
-}
-
-impl SecureString {
-    #[must_use]
-    pub fn new(s: String) -> Self {
-        Self(s)
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_bytes()
-    }
 }
 
 pub fn decode_secret_text(bytes: Vec<u8>) -> Result<String, Box<dyn std::error::Error>> {
@@ -69,4 +57,37 @@ pub struct EncryptedExport {
     pub salt: Vec<u8>,
     pub nonce: [u8; 12],
     pub ciphertext: Vec<u8>,
+}
+
+fn deserialize_bounded_entries<'de, D>(deserializer: D) -> Result<Vec<ExportEntry>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct BoundedEntries;
+
+    impl<'de> Visitor<'de> for BoundedEntries {
+        type Value = Vec<ExportEntry>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a list of export entries")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut entries = Vec::new();
+            while let Some(entry) = sequence.next_element::<ExportEntry>()? {
+                if entries.len() >= MAX_ENTRIES {
+                    return Err(de::Error::custom(format!(
+                        "Too many entries (limit is {MAX_ENTRIES})"
+                    )));
+                }
+                entries.push(entry);
+            }
+            Ok(entries)
+        }
+    }
+
+    deserializer.deserialize_seq(BoundedEntries)
 }

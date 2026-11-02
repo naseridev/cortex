@@ -1,21 +1,22 @@
 use crate::{
-    core::{
-        crypto::Crypto,
-        types::{SecureString, decode_secret_text},
-    },
-    modules::{gateway::Gateway, password::Password, session::Session},
+    core::{crypto::Crypto, types::decode_secret_text},
+    core::password::Password,
+    modules::{gateway::Gateway, session::Session},
     ui::prompt::UserPrompt,
 };
+use zeroize::Zeroizing;
 
 pub struct Reset;
 
 impl Reset {
     pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
-        let (storage, crypto) = Gateway::login()?;
+        let (storage, crypto) = Gateway::login_for_recovery()?;
 
-        println!("Creating backup before reset...");
-        storage.create_backup()?;
-        println!("Backup created successfully.\n");
+        if storage.verify_integrity().is_err() {
+            eprintln!(
+                "Warning: the vault had no valid integrity record. The reset rebuilds it from the current contents, so review your entries afterwards."
+            );
+        }
 
         let new_password = loop {
             let password = UserPrompt::password("New master password: ")?;
@@ -34,7 +35,7 @@ impl Reset {
 
         for (name, entry) in &entries {
             let decrypted = crypto.decrypt_entry(name, entry)?;
-            let password = SecureString::new(decode_secret_text(decrypted)?);
+            let password = Zeroizing::new(decode_secret_text(decrypted)?);
             let description = crypto.decrypt_description(name, entry)?;
             let tags = crypto.decrypt_tags(name, entry)?;
             decrypted_entries.push((name.clone(), password, description, tags));
@@ -59,10 +60,19 @@ impl Reset {
             updated_entries.push((name.clone(), new_entry));
         }
 
-        storage.atomic_reset(&updated_entries, &new_crypto.verification(), &new_salt)?;
+        storage.atomic_reset(&updated_entries, &new_crypto, &new_salt)?;
         Session::clear_session()?;
 
         println!("Master password reset successfully.");
+        println!(
+            "Account passwords were not changed. Change the password of every stored account now."
+        );
+        println!(
+            "Passwords stored in this vault may already be exposed if someone else accessed it."
+        );
+        println!(
+            "Dumps created earlier still require the master password that was active when they were made."
+        );
 
         Ok(())
     }

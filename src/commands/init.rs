@@ -1,6 +1,6 @@
 use crate::{
     core::{crypto::Crypto, storage::Storage},
-    modules::{password::Password, validation::Validation},
+    core::{password::Password, validation::Validation},
     ui::prompt::UserPrompt,
 };
 
@@ -24,7 +24,7 @@ impl Init {
 
         let (crypto, salt) = Crypto::create(&master_password)?;
 
-        Storage::new()?.init_db(&crypto.verification(), &salt)?;
+        Storage::new()?.init_db(&crypto, &salt)?;
 
         println!("Initialized.");
         println!("\nIMPORTANT: Store your master password safely!");

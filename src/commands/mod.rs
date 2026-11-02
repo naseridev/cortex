@@ -1,6 +1,7 @@
 pub mod config;
 pub mod create;
 pub mod delete;
+pub mod dump;
 pub mod edit;
 pub mod export;
 pub mod find;
@@ -12,4 +13,5 @@ pub mod lock;
 pub mod pass;
 pub mod purge;
 pub mod reset;
+pub mod restore;
 pub mod tag;

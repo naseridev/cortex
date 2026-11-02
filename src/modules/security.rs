@@ -1,5 +1,5 @@
 use crate::ui::prompt::UserPrompt;
-use rand::{Rng, rngs::OsRng};
+use rand::{RngExt, rngs::ThreadRng};
 
 const PUZZLE_ATTEMPTS: u32 = 64;
 
@@ -11,8 +11,8 @@ enum Operator {
 }
 
 impl Operator {
-    fn random(rng: &mut OsRng) -> Self {
-        match rng.gen_range(0..3) {
+    fn random(rng: &mut ThreadRng) -> Self {
+        match rng.random_range(0..3) {
             0 => Self::Add,
             1 => Self::Subtract,
             _ => Self::Multiply,
@@ -40,7 +40,7 @@ pub struct Security;
 
 impl Security {
     pub fn generate_math_puzzle() -> Result<(String, i64), Box<dyn std::error::Error>> {
-        let mut rng = OsRng;
+        let mut rng = rand::rng();
         for _ in 0..PUZZLE_ATTEMPTS {
             if let Some(puzzle) = Self::try_math_puzzle(&mut rng) {
                 return Ok(puzzle);
@@ -49,10 +49,10 @@ impl Security {
         Err("Could not generate a confirmation puzzle".into())
     }
 
-    fn try_math_puzzle(rng: &mut OsRng) -> Option<(String, i64)> {
-        let a: i64 = rng.gen_range(10..=100);
-        let b: i64 = rng.gen_range(5..=50);
-        let c: i64 = rng.gen_range(3..=40);
+    fn try_math_puzzle(rng: &mut ThreadRng) -> Option<(String, i64)> {
+        let a: i64 = rng.random_range(10..=100);
+        let b: i64 = rng.random_range(5..=50);
+        let c: i64 = rng.random_range(3..=40);
         let first = Operator::random(rng);
         let second = Operator::random(rng);
 

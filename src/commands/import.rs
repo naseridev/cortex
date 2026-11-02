@@ -3,13 +3,14 @@ use crate::{
         crypto::Crypto,
         limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
-        types::{ExportEntry, PasswordEntry, SecureString},
+        types::{ExportEntry, PasswordEntry},
     },
-    modules::{export_format, gateway::Gateway},
+    core::export_format,
+    modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
 use std::{collections::HashSet, fs, path::Path};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct Import;
 
@@ -101,9 +102,7 @@ impl Import {
         }
     }
 
-    fn validate_entries(
-        entries: Vec<ExportEntry>,
-    ) -> (Vec<(ExportEntry, Vec<String>)>, Vec<String>) {
+    fn validate_entries(entries: Vec<ExportEntry>) -> (Vec<ExportEntry>, Vec<String>) {
         let mut validated_entries = Vec::new();
         let mut validation_errors = Vec::new();
         let mut seen_names = HashSet::new();
@@ -111,19 +110,12 @@ impl Import {
         for mut entry in entries {
             if !seen_names.insert(entry.name.clone()) {
                 validation_errors.push(format!("Duplicate entry in file: {}", entry.name));
-                entry.password.zeroize_string();
                 continue;
             }
 
-            match export_format::normalize_and_validate(&mut entry) {
-                Ok(()) => {
-                    let tags = entry.tags.clone();
-                    validated_entries.push((entry, tags));
-                }
-                Err(message) => {
-                    validation_errors.push(format!("{}: {message}", entry.name));
-                    entry.password.zeroize_string();
-                }
+            match export_format::validate_import(&mut entry) {
+                Ok(()) => validated_entries.push(entry),
+                Err(message) => validation_errors.push(format!("{}: {message}", entry.name)),
             }
         }
 
@@ -133,23 +125,17 @@ impl Import {
     fn apply_entries(
         storage: &Storage,
         crypto: &Crypto,
-        validated_entries: Vec<(ExportEntry, Vec<String>)>,
+        entries: Vec<ExportEntry>,
         overwrite: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut imported_names = Vec::new();
-        let mut original_entries: Vec<(String, PasswordEntry)> = Vec::new();
-
-        let mut imported = 0;
+        let mut prepared: Vec<(String, PasswordEntry)> = Vec::new();
+        let mut created: Vec<String> = Vec::new();
+        let mut updated: Vec<String> = Vec::new();
         let mut skipped = 0;
         let mut failed = 0;
 
-        for (mut entry, normalized_tags) in validated_entries {
-            let exists = match storage.entry_exists(&entry.name) {
-                Ok(exists) => exists,
-                Err(error) => {
-                    return Self::fail_import(storage, &imported_names, &original_entries, error);
-                }
-            };
+        for mut entry in entries {
+            let exists = storage.entry_exists(&entry.name)?;
 
             if exists && !overwrite {
                 eprintln!(
@@ -157,87 +143,50 @@ impl Import {
                     entry.name
                 );
                 skipped += 1;
-                entry.password.zeroize_string();
                 continue;
             }
 
-            if exists {
-                match storage.get_password(&entry.name) {
-                    Ok(Some(original)) => original_entries.push((entry.name.clone(), original)),
-                    Ok(None) => {
-                        return Self::fail_import(
-                            storage,
-                            &imported_names,
-                            &original_entries,
-                            format!("Entry '{}' disappeared before overwrite", entry.name),
-                        );
-                    }
-                    Err(error) => {
-                        return Self::fail_import(
-                            storage,
-                            &imported_names,
-                            &original_entries,
-                            error,
-                        );
-                    }
-                }
-            }
-
-            let tag_list = if normalized_tags.is_empty() {
+            let secure_password = Zeroizing::new(std::mem::take(&mut entry.password));
+            let tag_list = if entry.tags.is_empty() {
                 None
             } else {
-                Some(normalized_tags.as_slice())
+                Some(entry.tags.as_slice())
             };
-
-            let secure_pass = SecureString::new(std::mem::take(&mut entry.password));
 
             match crypto.create_entry(
                 &entry.name,
-                secure_pass.as_bytes(),
+                secure_password.as_bytes(),
                 entry.description.as_deref(),
                 tag_list,
             ) {
-                Ok(password_entry) => {
-                    let result = if exists {
-                        storage.edit_password(&entry.name, &password_entry)
+                Ok(stored) => {
+                    if exists {
+                        updated.push(entry.name.clone());
                     } else {
-                        storage.create_password(&entry.name, &password_entry)
-                    };
-
-                    match result {
-                        Ok(true) => {
-                            if exists {
-                                println!("Updated: {}", entry.name);
-                            } else {
-                                println!("Imported: {}", entry.name);
-                                imported_names.push(entry.name.clone());
-                            }
-                            imported += 1;
-                        }
-                        Ok(false) => {
-                            eprintln!("Failed to import: {}", entry.name);
-                            failed += 1;
-                        }
-                        Err(error) => {
-                            eprintln!("Error importing '{}': {error}", entry.name);
-                            return Self::fail_import(
-                                storage,
-                                &imported_names,
-                                &original_entries,
-                                error,
-                            );
-                        }
+                        created.push(entry.name.clone());
                     }
+                    prepared.push((entry.name.clone(), stored));
                 }
-                Err(e) => {
-                    eprintln!("Error creating entry for '{}': {}", entry.name, e);
+                Err(error) => {
+                    eprintln!("Error creating entry for '{}': {error}", entry.name);
                     failed += 1;
                 }
             }
         }
 
+        storage
+            .put_entries(&prepared)
+            .map_err(|error| format!("Import aborted, no changes were written: {error}"))?;
+
+        for name in &created {
+            println!("Imported: {name}");
+        }
+        for name in &updated {
+            println!("Updated: {name}");
+        }
+
         println!("\nImport completed:");
-        println!("  Imported: {imported}");
+        println!("  Imported: {}", prepared.len());
         if skipped > 0 {
             println!("  Skipped: {skipped}");
         }
@@ -246,65 +195,5 @@ impl Import {
         }
 
         Ok(())
-    }
-
-    fn fail_import(
-        storage: &Storage,
-        imported_names: &[String],
-        original_entries: &[(String, PasswordEntry)],
-        error: impl std::fmt::Display,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        if let Err(rollback_error) =
-            Self::rollback_import(storage, imported_names, original_entries)
-        {
-            return Err(
-                format!("Import failed: {error}. Rollback also failed: {rollback_error}").into(),
-            );
-        }
-        Err(format!("Import failed, changes rolled back: {error}").into())
-    }
-
-    fn rollback_import(
-        storage: &Storage,
-        imported_names: &[String],
-        original_entries: &[(String, PasswordEntry)],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        eprintln!("\nRolling back changes...");
-        let mut rollback_error: Option<Box<dyn std::error::Error>> = None;
-
-        for name in imported_names {
-            if let Err(error) = storage.delete_password(name) {
-                eprintln!("Rollback failed to delete '{name}': {error}");
-                if rollback_error.is_none() {
-                    rollback_error = Some(error);
-                }
-            }
-        }
-
-        for (name, entry) in original_entries {
-            if let Err(error) = storage.edit_password(name, entry) {
-                eprintln!("Rollback failed to restore '{name}': {error}");
-                if rollback_error.is_none() {
-                    rollback_error = Some(error);
-                }
-            }
-        }
-
-        storage.flush()?;
-        if let Some(error) = rollback_error {
-            return Err(error);
-        }
-        eprintln!("Rollback completed.");
-        Ok(())
-    }
-}
-
-trait ZeroizeExt {
-    fn zeroize_string(&mut self);
-}
-
-impl ZeroizeExt for String {
-    fn zeroize_string(&mut self) {
-        self.zeroize();
     }
 }

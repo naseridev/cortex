@@ -1,17 +1,16 @@
 use crate::{
-    modules::{gateway::Gateway, password::Password, tags::TagValidator, validation::Validation},
+    core::limits::MIN_ACCOUNT_PASSWORD_LENGTH,
+    core::{password::Password, tags::TagValidator, validation::Validation},
+    modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
-
-const MIN_ACCOUNT_PASSWORD_LENGTH: usize = 4;
+use zeroize::Zeroizing;
 
 pub struct Create;
 
 impl Create {
     pub fn execute(name: &str, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") || name.trim().is_empty() || name.len() > 128 {
-            return Err("Invalid account name".into());
-        }
+        Validation::check_account_name(name)?;
 
         let (storage, crypto) = Gateway::login()?;
 
@@ -28,11 +27,14 @@ impl Create {
         let confirm_password = UserPrompt::password("Confirm password: ")?;
         Password::match_check(password.as_str(), confirm_password.as_str())?;
 
-        let description_input = UserPrompt::text_with_limit("Description (optional): ", 500)?;
+        let description_input = Zeroizing::new(UserPrompt::text_with_limit(
+            "Description (optional): ",
+            500,
+        )?);
+        Validation::check_description_text(description_input.as_str())?;
+        Password::in_desc_check(password.as_str(), description_input.as_str())?;
 
-        Password::in_desc_check(password.as_str(), &description_input)?;
-
-        let description = if description_input.is_empty() {
+        let description = if description_input.as_str().is_empty() {
             None
         } else {
             Some(description_input.as_str())

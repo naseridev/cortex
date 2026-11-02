@@ -1,4 +1,7 @@
-use crate::modules::password::{Password, PasswordCharset};
+use crate::{
+    core::limits::MIN_ACCOUNT_PASSWORD_LENGTH,
+    core::password::{Password, PasswordCharset},
+};
 
 pub struct Pass;
 
@@ -8,8 +11,11 @@ impl Pass {
         count: usize,
         charset: PasswordCharset,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if length < 4 {
-            return Err("Password length must be at least 4 characters.".into());
+        if length < MIN_ACCOUNT_PASSWORD_LENGTH {
+            return Err(format!(
+                "Password length must be at least {MIN_ACCOUNT_PASSWORD_LENGTH} characters."
+            )
+            .into());
         }
 
         if length > 128 {

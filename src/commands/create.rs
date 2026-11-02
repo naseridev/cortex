@@ -29,11 +29,11 @@ impl Create {
         let description_input = Zeroizing::new(UserPrompt::text_with_limit(
             "Description (optional): ",
             MAX_DESCRIPTION_BYTES,
-        )?);        
+        )?);
 
         Validation::check_description_text(description_input.as_str())?;
         Password::in_desc_check(password.as_str(), description_input.as_str())?;
-        
+
         let description = (!description_input.is_empty()).then_some(description_input.as_str());
         let tag_list = tags
             .map(|raw| TagValidator::parse_and_validate(&raw))
@@ -59,7 +59,7 @@ impl Create {
     }
 
     fn prompt_new_password() -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
-        let password = UserPrompt::password("Password to store: ")?;
+        let password = UserPrompt::visible_password("Password to store: ")?;
         Password::length_check(password.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
 
         let confirmation = UserPrompt::password("Confirm password: ")?;

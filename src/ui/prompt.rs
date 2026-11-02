@@ -15,6 +15,32 @@ impl UserPrompt {
         }
     }
 
+    pub fn visible_password(prompt: &str) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+        print!("{prompt}");
+        io::stdout().flush()?;
+
+        let raw = Self::read_bounded_line()?;
+        let mut secret = Zeroizing::new(String::from_utf8(raw).map_err(|error| {
+            let mut bytes = error.into_bytes();
+            bytes.zeroize();
+            "Input is not valid UTF-8"
+        })?);
+
+        while secret.ends_with(['\n', '\r']) {
+            secret.pop();
+        }
+
+        if secret.is_empty() {
+            return Err("Empty password not allowed".into());
+        }
+
+        if secret.len() > MAX_PASSWORD_BYTES {
+            return Err("Password too long (max 128 chars)".into());
+        }
+
+        Ok(secret)
+    }
+
     pub fn optional_password(
         prompt: &str,
     ) -> Result<Option<Zeroizing<String>>, Box<dyn std::error::Error>> {

@@ -17,11 +17,8 @@ use zeroize::Zeroize;
 pub const RESERVED_PREFIX: &str = "__";
 
 const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
-const DB_FILE: &str = "vault.redb";
+const ACCOUNTS_FILE: &str = "accounts.bin";
 const LEGACY_DB_DIR: &str = ".password-store";
-const LOCK_FILE: &str = ".cortex.lock";
-const DUMP_DIR: &str = "dumps";
-const LEGACY_BACKUP_DIR: &str = "backups";
 const INIT_MARKER: &str = "__init__";
 const SALT_KEY: &str = "__salt__";
 const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
@@ -37,11 +34,17 @@ const DUMP_INTEGRITY_MESSAGE: &str = "Dump integrity check failed.";
 const INTEGRITY_FAILED_MESSAGE: &str = "Database integrity check failed. Stored data was modified, replaced or removed outside of cortex.";
 const LEGACY_VAULT_MESSAGE: &str =
     "This vault predates integrity protection. Run 'reset' once to upgrade it.";
-const LEGACY_DATABASE_MESSAGE: &str = "A database from an older cortex version was found. Export it to CSV with that version, run 'init' here, then 'import' the CSV.";
+const LEGACY_DATABASE_MESSAGE: &str = "A database from an older cortex version was found. Export it to CSV with that version, run 'account create' here, then 'import' the CSV.";
 const DATABASE_LOCKED_MESSAGE: &str = "Database is locked by another process";
 
 type Changes = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+struct AccountRegistry {
+    active: Option<String>,
+    accounts: Vec<String>,
+}
 
 pub(crate) fn encode_value<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
     postcard::to_allocvec(value).map_err(|error| format!("Failed to serialize data: {error}"))
@@ -71,6 +74,11 @@ pub struct Storage {
 impl Storage {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let db_path = Self::get_db_path()?;
+        Self::open_at(&db_path)
+    }
+
+    pub fn open_account(name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let db_path = Self::get_account_db_path(name)?;
         Self::open_at(&db_path)
     }
 
@@ -331,27 +339,6 @@ impl Storage {
         Ok(entries)
     }
 
-    pub fn purge_database(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let txn = self.db.begin_write()?;
-
-        txn.delete_table(VAULT)?;
-        txn.commit()?;
-
-        let db_path = Self::get_db_path()?;
-
-        if let Some(parent) = db_path.parent() {
-            for directory in [DUMP_DIR, LEGACY_BACKUP_DIR, LEGACY_DB_DIR] {
-                let _ = fs::remove_dir_all(parent.join(directory));
-            }
-
-            let _ = fs::remove_file(parent.join(LOCK_FILE));
-        }
-
-        let _ = fs::remove_file(&db_path);
-
-        Ok(())
-    }
-
     pub fn create_dump(&self, crypto: &Crypto) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let dump_dir = std::env::current_dir()
             .map_err(|error| format!("Failed to read the current directory: {error}"))?;
@@ -530,7 +517,7 @@ impl Storage {
             .map_or(0, |elapsed| elapsed.as_nanos())
     }
 
-    pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    pub fn cortex_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path =
             platform::config_dir().ok_or("Could not determine the configuration directory")?;
         path.push("cortex");
@@ -540,20 +527,223 @@ impl Storage {
         platform::restrict_to_owner(&path)
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
 
-        path.push(DB_FILE);
         Ok(path)
     }
 
-    pub fn database_exists() -> Result<bool, Box<dyn std::error::Error>> {
-        let db_path = Self::get_db_path()?;
+    #[must_use]
+    pub fn account_file_name(name: &str) -> String {
+        let hash = blake3::hash(name.as_bytes());
+        format!("{}.redb", hash.to_hex())
+    }
+
+    pub fn get_account_db_path(name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let mut path = Self::cortex_dir()?;
+        path.push(Self::account_file_name(name));
+        Ok(path)
+    }
+
+    pub fn active_account() -> Result<Option<String>, Box<dyn std::error::Error>> {
+        Ok(Self::load_registry()?.active)
+    }
+
+    pub fn account_exists(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let registry = Self::load_registry()?;
+        Ok(registry.accounts.iter().any(|account| account == name)
+            && Self::account_db_file_exists(name)?)
+    }
+
+    pub fn list_accounts() -> Result<(Vec<String>, Option<String>), Box<dyn std::error::Error>> {
+        let registry = Self::load_registry()?;
+        Ok((registry.accounts, registry.active))
+    }
+
+    pub fn register_account(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut registry = Self::load_registry()?;
+        if !registry.accounts.iter().any(|account| account == name) {
+            registry.accounts.push(name.to_string());
+            registry.accounts.sort();
+        }
+        registry.active = Some(name.to_string());
+        Self::save_registry(&registry)
+    }
+
+    pub fn switch_account(name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut registry = Self::load_registry()?;
+        if !registry.accounts.iter().any(|account| account == name) {
+            return Err(format!("Account '{name}' not found.").into());
+        }
+        registry.active = Some(name.to_string());
+        Self::save_registry(&registry)
+    }
+
+    pub fn rename_account(
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut registry = Self::load_registry()?;
+
+        if !registry.accounts.iter().any(|name| name == old_name) {
+            return Err(format!("Account '{old_name}' not found.").into());
+        }
+
+        if registry.accounts.iter().any(|name| name == new_name)
+            || Self::account_db_file_exists(new_name)?
+        {
+            return Err(format!("Account '{new_name}' already exists.").into());
+        }
+
+        let old_path = Self::get_account_db_path(old_name)?;
+        let new_path = Self::get_account_db_path(new_name)?;
+
+        fs::rename(&old_path, &new_path).map_err(|error| {
+            format!("Failed to rename database from '{old_name}' to '{new_name}': {error}")
+        })?;
+
+        platform::restrict_to_owner(&new_path).map_err(|error| {
+            format!(
+                "Failed to set permissions on {}: {error}",
+                new_path.display()
+            )
+        })?;
+
+        for account in &mut registry.accounts {
+            if account == old_name {
+                *account = new_name.to_string();
+            }
+        }
+        registry.accounts.sort();
+
+        if registry.active.as_deref() == Some(old_name) {
+            registry.active = Some(new_name.to_string());
+        }
+
+        Self::save_registry(&registry)
+    }
+
+    pub fn delete_account(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut registry = Self::load_registry()?;
+
+        if !registry.accounts.iter().any(|account| account == name) {
+            return Err(format!("Account '{name}' not found.").into());
+        }
+
+        let db_path = Self::get_account_db_path(name)?;
+        if db_path.exists() {
+            fs::remove_file(&db_path).map_err(|error| {
+                format!("Failed to delete database for account '{name}': {error}")
+            })?;
+        }
+
+        registry.accounts.retain(|account| account != name);
+
+        let was_active = registry.active.as_deref() == Some(name);
+        if was_active {
+            registry.active = registry.accounts.first().cloned();
+        }
+
+        Self::save_registry(&registry)?;
+        Ok(was_active)
+    }
+
+    fn account_db_file_exists(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        let db_path = Self::get_account_db_path(name)?;
         Ok(fs::metadata(&db_path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0))
     }
 
+    fn registry_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        Ok(Self::cortex_dir()?.join(ACCOUNTS_FILE))
+    }
+
+    fn load_registry() -> Result<AccountRegistry, Box<dyn std::error::Error>> {
+        let path = Self::registry_path()?;
+        if !path.exists() {
+            return Ok(AccountRegistry::default());
+        }
+
+        let bytes = fs::read(&path)
+            .map_err(|error| format!("Failed to read accounts registry: {error}"))?;
+        if bytes.is_empty() {
+            return Ok(AccountRegistry::default());
+        }
+
+        let mut registry: AccountRegistry = decode_value(&bytes)
+            .map_err(|error| format!("Invalid accounts registry data: {error}"))?;
+
+        let mut valid_accounts = Vec::with_capacity(registry.accounts.len());
+        for name in registry.accounts {
+            if Self::account_db_file_exists(&name)? && !valid_accounts.contains(&name) {
+                valid_accounts.push(name);
+            }
+        }
+        valid_accounts.sort();
+        registry.accounts = valid_accounts;
+
+        let active_is_valid = registry
+            .active
+            .as_ref()
+            .is_some_and(|active| registry.accounts.contains(active));
+
+        if !active_is_valid {
+            registry.active = registry.accounts.first().cloned();
+        }
+
+        Ok(registry)
+    }
+
+    fn save_registry(registry: &AccountRegistry) -> Result<(), Box<dyn std::error::Error>> {
+        let path = Self::registry_path()?;
+        let bytes = encode_value(registry)?;
+        let directory = path.parent().unwrap_or(Path::new("."));
+
+        let mut temp = tempfile::NamedTempFile::new_in(directory).map_err(|error| {
+            format!(
+                "Failed to create temporary file in {}: {error}",
+                directory.display()
+            )
+        })?;
+
+        temp.write_all(&bytes).map_err(|error| {
+            format!(
+                "Failed to write accounts registry {}: {error}",
+                path.display()
+            )
+        })?;
+        temp.as_file().sync_all().map_err(|error| {
+            format!(
+                "Failed to sync accounts registry {}: {error}",
+                path.display()
+            )
+        })?;
+
+        platform::restrict_to_owner(temp.path())
+            .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
+        temp.persist(&path).map_err(|error| {
+            format!(
+                "Failed to save accounts registry {}: {}",
+                path.display(),
+                error.error
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let active = Self::active_account()?
+            .ok_or("No accounts found. Create one with 'account create'.")?;
+        Self::get_account_db_path(&active)
+    }
+
+    pub fn database_exists() -> Result<bool, Box<dyn std::error::Error>> {
+        let Some(active) = Self::active_account()? else {
+            return Ok(false);
+        };
+        Self::account_db_file_exists(&active)
+    }
+
     pub fn legacy_database_present() -> Result<bool, Box<dyn std::error::Error>> {
-        let db_path = Self::get_db_path()?;
-        Ok(db_path
-            .parent()
-            .is_some_and(|parent| parent.join(LEGACY_DB_DIR).exists()))
+        let dir = Self::cortex_dir()?;
+        Ok(dir.join(LEGACY_DB_DIR).exists())
     }
 
     #[must_use]

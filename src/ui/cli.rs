@@ -17,8 +17,11 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    #[command(about = "Initialize a new password database with master password")]
-    Init,
+    #[command(about = "Manage accounts")]
+    Account {
+        #[command(subcommand)]
+        action: AccountAction,
+    },
 
     #[command(about = "Create a new password entry")]
     Create {
@@ -131,9 +134,38 @@ pub enum Commands {
 
     #[command(about = "Clear authentication session and require re-login")]
     Lock,
+}
 
-    #[command(about = "Permanently purge the entire password database")]
-    Purge,
+#[derive(Subcommand)]
+pub enum AccountAction {
+    #[command(about = "Create a new account")]
+    Create {
+        #[arg(help = "Name for the new account")]
+        name: Option<String>,
+    },
+
+    #[command(about = "List all existing accounts")]
+    List,
+
+    #[command(about = "Edit an existing account name")]
+    Edit {
+        #[arg(help = "Current name of the account")]
+        name: Option<String>,
+        #[arg(help = "New name for the account")]
+        new_name: Option<String>,
+    },
+
+    #[command(about = "Delete an existing account")]
+    Delete {
+        #[arg(help = "Name of the account to delete")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Switch between accounts")]
+    Switch {
+        #[arg(help = "Name of the account to switch to")]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

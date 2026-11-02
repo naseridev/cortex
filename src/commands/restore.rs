@@ -1,5 +1,8 @@
 use crate::{
-    core::{config::Config, crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage},
+    core::{
+        config::Config, crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage,
+        validation::Validation,
+    },
     modules::security::Security,
     modules::session::Session,
     ui::prompt::UserPrompt,
@@ -10,6 +13,8 @@ pub struct Restore;
 
 impl Restore {
     pub fn execute(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        Validation::storage_probe(true, "No accounts found. Create one with 'account create'.")?;
+
         let path = Path::new(file_path);
         let size = fs::metadata(path)
             .map_err(|_| format!("File not found: {file_path}"))?

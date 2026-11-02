@@ -1,12 +1,12 @@
 use clap::Parser;
 use cortex::{
     commands::{
-        config::ConfigCmd, create::Create, delete::Delete, dump::Dump, edit::Edit, export::Export,
-        find::Find, get::Get, import::Import, init::Init, list::List, lock::Lock, pass::Pass,
-        purge::Purge, reset::Reset, restore::Restore, tag::Tag,
+        account::Account, config::ConfigCmd, create::Create, delete::Delete, dump::Dump,
+        edit::Edit, export::Export, find::Find, get::Get, import::Import, list::List, lock::Lock,
+        pass::Pass, reset::Reset, restore::Restore, tag::Tag,
     },
     core::{password::PasswordCharset, tags::TagValidator},
-    ui::cli::{Cli, Commands, ConfigAction, TagAction},
+    ui::cli::{AccountAction, Cli, Commands, ConfigAction, TagAction},
 };
 use std::process::ExitCode;
 
@@ -24,7 +24,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init => Init::execute(),
+        Commands::Account { action } => run_account(action),
         Commands::Create { name, tags } => Create::execute(&name, tags),
         Commands::Get { name, show } => Get::execute(&name, show),
         Commands::List { show_tags } => List::execute(show_tags),
@@ -40,7 +40,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Reset => Reset::execute(),
         Commands::Dump => Dump::execute(),
         Commands::Restore { file } => Restore::execute(&file),
-        Commands::Purge => Purge::execute(),
         Commands::Lock => Lock::execute(),
         Commands::Config { action } => match action {
             Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
@@ -66,6 +65,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Pass::execute(length, count, PasswordCharset::from_bits(bits))
         }
         Commands::Tag { action } => run_tag(action),
+    }
+}
+
+fn run_account(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        AccountAction::Create { name } => Account::create(name),
+        AccountAction::List => Account::list(),
+        AccountAction::Edit { name, new_name } => Account::edit(name, new_name),
+        AccountAction::Delete { name } => Account::delete(name),
+        AccountAction::Switch { name } => Account::switch(name),
     }
 }
 

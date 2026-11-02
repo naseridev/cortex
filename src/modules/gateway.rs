@@ -36,6 +36,22 @@ impl Gateway {
         Ok((storage, crypto))
     }
 
+    pub fn login_account(name: &str) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
+        let (storage, header) = Self::open_account_vault(name)?;
+        let crypto = Self::prompt_master_key(&storage, &header)?;
+
+        Self::finish_login(storage, crypto)
+    }
+
+    pub fn login_account_for_recovery(
+        name: &str,
+    ) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
+        let (storage, header) = Self::open_account_vault(name)?;
+        let crypto = Self::prompt_master_key(&storage, &header)?;
+        storage.bind_integrity(&crypto);
+        Ok((storage, crypto))
+    }
+
     pub fn login_with_session() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_vault()?;
 
@@ -87,10 +103,26 @@ impl Gateway {
     }
 
     fn open_vault() -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
-        Validation::storage_probe(true, "Database not initialized. Use 'init' command.")?;
-
+        Validation::storage_probe(true, "No accounts found. Create one with 'account create'.")?;
         let storage = Storage::new()?;
+        Self::read_header(storage)
+    }
 
+    fn open_account_vault(
+        name: &str,
+    ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
+        let (accounts, _) = Storage::list_accounts()?;
+        if accounts.is_empty() {
+            return Err("No accounts found. Create one with 'account create'.".into());
+        }
+        if !Storage::account_exists(name)? {
+            return Err(format!("Account '{name}' not found.").into());
+        }
+        let storage = Storage::open_account(name)?;
+        Self::read_header(storage)
+    }
+
+    fn read_header(storage: Storage) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
         Config::clear_cache();
         Config::load_from_db(&storage)?;
 

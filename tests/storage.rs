@@ -32,6 +32,15 @@ fn initialized_storage() -> Result<(TempDir, Storage, Crypto), Box<dyn std::erro
 }
 
 #[test]
+fn account_file_names_are_hashed_and_distinct() {
+    let first = Storage::account_file_name("personal");
+    let second = Storage::account_file_name("work");
+    assert_ne!(first, second);
+    assert!(first.ends_with(".redb"));
+    assert!(!first.contains("personal"));
+}
+
+#[test]
 fn integrity_holds_across_writes() -> Result<(), Box<dyn std::error::Error>> {
     let (_directory, storage, crypto) = initialized_storage()?;
     storage.verify_integrity()?;

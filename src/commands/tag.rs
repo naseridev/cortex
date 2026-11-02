@@ -15,7 +15,7 @@ pub struct Tag;
 
 impl Tag {
     pub fn list() -> Result<(), Box<dyn std::error::Error>> {
-        let (storage, crypto) = Gateway::login()?;
+        let (storage, crypto) = Gateway::login_with_session()?;
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
 
         for (name, entry) in storage.list_entries()? {

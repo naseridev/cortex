@@ -25,7 +25,7 @@ impl Find {
         ignore_case: bool,
         names_only: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (storage, crypto) = Gateway::login()?;
+        let (storage, crypto) = Gateway::login_with_session()?;
 
         let entries = storage.search_entries(pattern)?;
         let regex = RegexBuilder::new(pattern)

@@ -16,7 +16,8 @@ impl Create {
     pub fn execute(name: &str, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
         Validation::check_account_name(name)?;
 
-        let (storage, crypto) = Gateway::login()?;
+        let (storage, crypto) = Gateway::login_with_session()?;
+
         Validation::account_exists_probe(
             &storage,
             name,
@@ -28,11 +29,11 @@ impl Create {
         let description_input = Zeroizing::new(UserPrompt::text_with_limit(
             "Description (optional): ",
             MAX_DESCRIPTION_BYTES,
-        )?);
+        )?);        
 
         Validation::check_description_text(description_input.as_str())?;
         Password::in_desc_check(password.as_str(), description_input.as_str())?;
-
+        
         let description = (!description_input.is_empty()).then_some(description_input.as_str());
         let tag_list = tags
             .map(|raw| TagValidator::parse_and_validate(&raw))

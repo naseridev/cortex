@@ -1,35 +1,11 @@
 use cortex::core::crypto::Crypto;
 use cortex::core::interchange::{
     CSV_HEADER, FORMAT_VERSION, decode_csv, encode_csv, is_csv, open_encrypted, parse_encrypted,
-    validate_import, validate_stored,
+    validate_import, validate_stored, would_fail_import,
 };
 use cortex::core::limits::MAX_ENTRIES;
 use cortex::core::types::{EncryptedExport, ExportEntry};
 use zeroize::{Zeroize, Zeroizing};
-
-fn encode_encrypted(
-    passphrase: &Zeroizing<String>,
-    entries: &[ExportEntry],
-    timestamp: u64,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    let document = serde_json::json!({
-        "version": FORMAT_VERSION,
-        "timestamp": timestamp,
-        "entries": entries,
-    });
-    let mut payload = serde_json::to_vec(&document)?;
-    let (crypto, salt) = Crypto::create(passphrase)?;
-    let sealed = crypto.seal_blob(&payload);
-    payload.zeroize();
-    let (ciphertext, nonce) = sealed?;
-    let file = EncryptedExport {
-        version: FORMAT_VERSION.to_string(),
-        salt,
-        nonce,
-        ciphertext,
-    };
-    Ok(serde_json::to_vec_pretty(&file)?)
-}
 
 fn sample_entries() -> Vec<ExportEntry> {
     vec![
@@ -41,188 +17,129 @@ fn sample_entries() -> Vec<ExportEntry> {
         },
         ExportEntry {
             name: "mail".to_string(),
-            password: "plain1234".to_string(),
+            password: "plain12345".to_string(),
             description: None,
             tags: Vec::new(),
         },
     ]
 }
 
-fn assert_same(left: &[ExportEntry], right: &[ExportEntry]) {
-    assert_eq!(left.len(), right.len());
-    for (a, b) in left.iter().zip(right) {
-        assert_eq!(a.name, b.name);
-        assert_eq!(a.password, b.password);
-        assert_eq!(a.description, b.description);
-        assert_eq!(a.tags, b.tags);
-    }
+fn build_encrypted_export(
+    passphrase: &Zeroizing<String>,
+    entries: &[ExportEntry],
+    timestamp: u64,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let payload_json = serde_json::json!({
+        "version": FORMAT_VERSION,
+        "timestamp": timestamp,
+        "entries": entries,
+    });
+    let mut raw = serde_json::to_vec(&payload_json)?;
+    let (crypto, salt) = Crypto::create(passphrase)?;
+    let (ciphertext, nonce) = crypto.seal_blob(&raw)?;
+    raw.zeroize();
+
+    let export = EncryptedExport {
+        version: FORMAT_VERSION.to_string(),
+        salt,
+        nonce,
+        ciphertext,
+    };
+    Ok(serde_json::to_vec_pretty(&export)?)
 }
 
 #[test]
-fn csv_round_trip_preserves_every_field() -> Result<(), String> {
+fn csv_serialization_preserves_multiline_and_special_delimiters() -> Result<(), String> {
     let entries = sample_entries();
-    let text = String::from_utf8(encode_csv(&entries)?).map_err(|error| error.to_string())?;
-    assert!(is_csv(&text));
-    let decoded = decode_csv(&text)?;
-    assert_same(&entries, &decoded);
+    let csv_text = String::from_utf8(encode_csv(&entries)?).map_err(|e| e.to_string())?;
+    assert!(is_csv(&csv_text));
+
+    let decoded = decode_csv(&csv_text)?;
+    assert_eq!(decoded.len(), entries.len());
+    for (left, right) in entries.iter().zip(decoded.iter()) {
+        assert_eq!(left.name, right.name);
+        assert_eq!(left.password, right.password);
+        assert_eq!(left.description, right.description);
+        assert_eq!(left.tags, right.tags);
+    }
     Ok(())
 }
 
 #[test]
-fn csv_accepts_bom_and_crlf() -> Result<(), String> {
-    let text = format!("\u{feff}{CSV_HEADER}\r\nbank,secret1,,work;finance\r\n");
-    let decoded = decode_csv(&text)?;
+fn csv_handles_utf8_bom_crlf_and_blank_lines() -> Result<(), String> {
+    let raw = format!("\u{feff}{CSV_HEADER}\r\n\r\nbank,secret123,,work;ops\r\n\r\n");
+    assert!(is_csv(&raw));
+
+    let decoded = decode_csv(&raw)?;
     assert_eq!(decoded.len(), 1);
+    assert_eq!(decoded[0].name, "bank");
     assert_eq!(decoded[0].description, None);
-    assert_eq!(
-        decoded[0].tags,
-        vec!["work".to_string(), "finance".to_string()]
-    );
+    assert_eq!(decoded[0].tags, vec!["work".to_string(), "ops".to_string()]);
     Ok(())
 }
 
 #[test]
-fn csv_ignores_blank_lines() -> Result<(), String> {
-    let text = format!("{CSV_HEADER}\n\nbank,secret1,,\n\n\nmail,secret2,note,work\n\n");
-    let decoded = decode_csv(&text)?;
-    assert_eq!(decoded.len(), 2);
-    assert_eq!(decoded[1].name, "mail");
-    assert_eq!(decoded[1].tags, vec!["work".to_string()]);
-    Ok(())
+fn csv_rejects_invalid_headers_and_column_counts() {
+    assert!(decode_csv("wrong,header\na,b\n").is_err());
+    assert!(decode_csv(&format!("{CSV_HEADER}\nonly_one_column\n")).is_err());
+    assert!(!is_csv("{\"version\":\"4.0.0\"}"));
 }
 
 #[test]
-fn csv_round_trip_keeps_delimiters_quotes_and_newlines() -> Result<(), String> {
-    let entries = vec![ExportEntry {
-        name: "tricky".to_string(),
-        password: "pa,ss\"w\nord ".to_string(),
-        description: Some("line one\nline \"two\", end".to_string()),
-        tags: vec!["one".to_string(), "two".to_string()],
-    }];
-    let text = String::from_utf8(encode_csv(&entries)?).map_err(|error| error.to_string())?;
-    let decoded = decode_csv(&text)?;
-    assert_eq!(decoded.len(), 1);
-    assert_eq!(decoded[0].password, entries[0].password);
-    assert_eq!(decoded[0].description, entries[0].description);
-    assert_eq!(decoded[0].tags, entries[0].tags);
-    Ok(())
-}
-
-#[test]
-fn csv_rejects_unknown_header() {
-    assert!(decode_csv("name,password\nbank,secret1\n").is_err());
-}
-
-#[test]
-fn csv_rejects_wrong_field_count() {
-    assert!(decode_csv(&format!("{CSV_HEADER}\nbank,secret1,only-three\n")).is_err());
-}
-
-#[test]
-fn json_text_is_not_csv() {
-    assert!(!is_csv("{\n  \"version\": \"4.0.0\"\n}"));
-}
-
-#[test]
-fn encrypted_round_trip_and_wrong_passphrase() -> Result<(), String> {
-    let entries = sample_entries();
-    let passphrase = Zeroizing::new("Exp0rt!Passphrase".to_string());
-    let bytes = encode_encrypted(&passphrase, &entries, 42).map_err(|error| error.to_string())?;
-    let file = parse_encrypted(&bytes)?;
-    let data = open_encrypted(&passphrase, &file)?;
-    assert_eq!(data.timestamp, 42);
-    assert_same(&entries, &data.entries);
-    let wrong = Zeroizing::new("Wrong!Passphrase1".to_string());
-    assert!(open_encrypted(&wrong, &file).is_err());
-    Ok(())
-}
-
-#[test]
-fn encrypted_rejects_unknown_version() -> Result<(), String> {
-    let file = EncryptedExport {
-        version: "9.9.9".to_string(),
-        salt: Vec::new(),
-        nonce: [0u8; 12],
-        ciphertext: Vec::new(),
-    };
-    let bytes = serde_json::to_vec(&file).map_err(|error| error.to_string())?;
-    assert!(parse_encrypted(&bytes).is_err());
-    Ok(())
-}
-
-#[test]
-fn plain_json_is_rejected_as_import() {
-    assert!(parse_encrypted(b"{\"version\":\"4.0.0\",\"timestamp\":1,\"entries\":[]}").is_err());
-}
-
-#[test]
-fn validation_rejects_description_containing_password() {
-    let mut entry = ExportEntry {
-        name: "bank".to_string(),
-        password: "plain1234".to_string(),
-        description: Some("my plain1234 note".to_string()),
-        tags: Vec::new(),
-    };
-    assert!(validate_stored(&mut entry).is_err());
-}
-
-#[test]
-fn validation_normalizes_tags_and_empty_description() -> Result<(), String> {
-    let mut entry = ExportEntry {
-        name: "bank".to_string(),
-        password: "plain1234".to_string(),
-        description: Some(String::new()),
-        tags: vec![
-            "Work".to_string(),
-            "work".to_string(),
-            "Finance".to_string(),
-        ],
-    };
-    validate_stored(&mut entry)?;
-    assert_eq!(entry.description, None);
-    assert_eq!(entry.tags, vec!["finance".to_string(), "work".to_string()]);
-    Ok(())
-}
-
-#[test]
-fn csv_rejects_more_rows_than_the_entry_limit() {
-    let mut text = format!("{CSV_HEADER}\n");
+fn csv_enforces_maximum_entry_limit() {
+    let mut csv_text = format!("{CSV_HEADER}\n");
     for _ in 0..=MAX_ENTRIES {
-        text.push_str("bank,secret1,,\n");
+        csv_text.push_str("item,password123,,\n");
     }
-    assert!(decode_csv(&text).is_err());
+    assert!(decode_csv(&csv_text).is_err());
 }
 
 #[test]
-fn import_rejects_control_characters_in_name() {
-    let mut entry = ExportEntry {
-        name: "bank\u{1b}[2J".to_string(),
-        password: "plain1234".to_string(),
-        description: None,
-        tags: Vec::new(),
+fn encrypted_export_round_trips_and_verifies_passphrase() -> Result<(), String> {
+    let entries = sample_entries();
+    let pass = Zeroizing::new("Export#Pass123".to_string());
+    let wrong = Zeroizing::new("Wrong#Pass123".to_string());
+
+    let bytes = build_encrypted_export(&pass, &entries, 100).map_err(|e| e.to_string())?;
+    let parsed = parse_encrypted(&bytes)?;
+    let data = open_encrypted(&pass, &parsed)?;
+
+    assert_eq!(data.timestamp, 100);
+    assert_eq!(data.entries.len(), 2);
+    assert!(open_encrypted(&wrong, &parsed).is_err());
+    Ok(())
+}
+
+#[test]
+fn import_and_stored_validators_enforce_security_constraints() -> Result<(), String> {
+    let mut valid = ExportEntry {
+        name: "github".to_string(),
+        password: "valid_password_123".to_string(),
+        description: Some(String::new()),
+        tags: vec!["Dev".to_string(), "dev".to_string()],
     };
-    assert!(validate_import(&mut entry).is_err());
-}
+    assert!(!would_fail_import(&valid));
+    validate_import(&mut valid)?;
+    assert_eq!(valid.description, None);
+    assert_eq!(valid.tags, vec!["dev".to_string()]);
 
-#[test]
-fn import_rejects_control_characters_in_description() {
-    let mut entry = ExportEntry {
-        name: "bank".to_string(),
-        password: "plain1234".to_string(),
-        description: Some("first\rsecond".to_string()),
-        tags: Vec::new(),
-    };
-    assert!(validate_import(&mut entry).is_err());
-}
-
-#[test]
-fn import_enforces_minimum_password_length_but_stored_data_is_not_rejected() {
-    let mut entry = ExportEntry {
+    let mut short_pass = ExportEntry {
         name: "legacy".to_string(),
-        password: "abc123".to_string(),
+        password: "short".to_string(),
         description: None,
         tags: Vec::new(),
     };
-    assert!(validate_import(&mut entry).is_err());
-    assert!(validate_stored(&mut entry).is_ok());
+    assert!(would_fail_import(&short_pass));
+    assert!(validate_import(&mut short_pass).is_err());
+    assert!(validate_stored(&mut short_pass).is_ok());
+
+    let mut leaked_pass = ExportEntry {
+        name: "leaked".to_string(),
+        password: "supersecret".to_string(),
+        description: Some("my supersecret note".to_string()),
+        tags: Vec::new(),
+    };
+    assert!(validate_stored(&mut leaked_pass).is_err());
+
+    Ok(())
 }

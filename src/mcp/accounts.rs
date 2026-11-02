@@ -21,6 +21,7 @@ impl McpAccounts {
             "active_agent_account": config.active_agent_account,
             "agent_accounts": agent_accounts,
         });
+
         serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
     }
 
@@ -37,11 +38,13 @@ impl McpAccounts {
                     "tag": "agent"
                 })).collect::<Vec<_>>()
             });
+
             return serde_json::to_string_pretty(&payload).map_err(|e| e.to_string());
         }
 
         let (accounts, human_active) = Accounts::list().map_err(|e| e.to_string())?;
         let mut list = Vec::with_capacity(accounts.len());
+
         for name in accounts {
             let is_agent = Accounts::is_agent(&name).map_err(|e| e.to_string())?;
             list.push(json!({
@@ -55,6 +58,7 @@ impl McpAccounts {
             "active_mcp_account": config.active_agent_account.as_ref().or(human_active.as_ref()),
             "accounts": list
         });
+
         serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
     }
 

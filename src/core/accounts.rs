@@ -112,6 +112,7 @@ impl Accounts {
                 | PasswordCharset::DIGITS
                 | PasswordCharset::SPECIAL,
         );
+
         let generated = Zeroizing::new(Password::generate(AGENT_MASTER_PASSWORD_LENGTH, charset)?);
         let (crypto, salt) = Crypto::create(&generated)?;
 
@@ -124,10 +125,13 @@ impl Accounts {
             registry.accounts.push(name.to_string());
             registry.accounts.sort();
         }
+
         registry.agent_keys.insert(name.to_string(), *crypto.key());
+
         if registry.active.is_none() {
             registry.active = Some(name.to_string());
         }
+
         Self::save_registry(&registry)
     }
 
@@ -137,15 +141,18 @@ impl Accounts {
             registry.accounts.push(name.to_string());
             registry.accounts.sort();
         }
+
         registry.active = Some(name.to_string());
         Self::save_registry(&registry)
     }
 
     pub fn switch(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut registry = Self::load_registry()?;
+
         if !registry.accounts.iter().any(|account| account == name) {
             return Err(format!("Account '{name}' not found.").into());
         }
+
         registry.active = Some(name.to_string());
         Self::save_registry(&registry)
     }
@@ -181,6 +188,7 @@ impl Accounts {
                 *account = new_name.to_string();
             }
         }
+
         registry.accounts.sort();
 
         if let Some(key) = registry.agent_keys.remove(old_name) {
@@ -311,6 +319,7 @@ impl Accounts {
                 valid_accounts.push(name);
             }
         }
+
         valid_accounts.sort();
         registry
             .agent_keys

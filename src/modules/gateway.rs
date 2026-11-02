@@ -25,6 +25,7 @@ struct VaultHeader {
 impl Gateway {
     pub fn login() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (name, storage, header) = Self::open_vault()?;
+
         if let Some(crypto) = Self::restore_agent_key(&name, &header)? {
             return Self::finish_login(storage, crypto);
         }
@@ -35,6 +36,7 @@ impl Gateway {
 
     pub fn login_for_recovery() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (name, storage, header) = Self::open_vault()?;
+
         if let Some(crypto) = Self::restore_agent_key(&name, &header)? {
             storage.bind_integrity(&crypto);
             return Ok((storage, crypto));
@@ -47,6 +49,7 @@ impl Gateway {
 
     pub fn login_account(name: &str) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_account_vault(name)?;
+
         if let Some(crypto) = Self::restore_agent_key(name, &header)? {
             return Self::finish_login(storage, crypto);
         }
@@ -59,12 +62,14 @@ impl Gateway {
         name: &str,
     ) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_account_vault(name)?;
+
         if let Some(crypto) = Self::restore_agent_key(name, &header)? {
             storage.bind_integrity(&crypto);
             return Ok((storage, crypto));
         }
 
         let crypto = Self::prompt_master_key(&storage, &header)?;
+
         storage.bind_integrity(&crypto);
         Ok((storage, crypto))
     }
@@ -166,10 +171,12 @@ impl Gateway {
 
     fn open_vault() -> Result<(String, Storage, VaultHeader), Box<dyn std::error::Error>> {
         Validation::storage_probe(true, "No accounts found. Create one with 'account create'.")?;
+
         let active =
             Accounts::active()?.ok_or("No accounts found. Create one with 'account create'.")?;
         let storage = Storage::open_account(&active)?;
         let (storage, header) = Self::read_header(storage, true)?;
+
         Ok((active, storage, header))
     }
 
@@ -177,12 +184,15 @@ impl Gateway {
         name: &str,
     ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
         let (accounts, _) = Accounts::list()?;
+
         if accounts.is_empty() {
             return Err("No accounts found. Create one with 'account create'.".into());
         }
+
         if !Accounts::exists(name)? {
             return Err(format!("Account '{name}' not found.").into());
         }
+
         let storage = Storage::open_account(name)?;
         Self::read_header(storage, true)
     }
@@ -193,6 +203,7 @@ impl Gateway {
         if !Accounts::exists(name)? {
             return Err(format!("Account '{name}' not found.").into());
         }
+
         let storage = Storage::open_account(name)?;
         Self::read_header(storage, false)
     }
@@ -232,6 +243,7 @@ impl Gateway {
             }
 
             storage.record_failed_attempt()?;
+
             if attempt < MAX_PASSWORD_ATTEMPTS_PER_RUN {
                 eprintln!("Sorry, try again.\n");
             }
@@ -243,6 +255,7 @@ impl Gateway {
 
     fn apply_throttle(storage: &Storage) -> Result<(), Box<dyn std::error::Error>> {
         let delay = throttle_delay_seconds(storage.failed_attempts()?);
+
         if delay > 0 {
             eprintln!("Too many failed attempts. Waiting {delay}s before the next try.");
             thread::sleep(Duration::from_secs(delay));

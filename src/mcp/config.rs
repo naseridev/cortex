@@ -79,9 +79,11 @@ impl McpConfig {
 
     pub fn describe_permission(&self) -> Result<String, Box<dyn std::error::Error>> {
         let perm = McpPermission::parse(&self.permission)?;
+
         if perm.is_disabled() {
             return Ok("disabled".to_string());
         }
+
         Ok(format!(
             "Account: {}, Write: {}, Read: {}",
             if perm.can_account() { "yes" } else { "no" },
@@ -98,6 +100,7 @@ impl McpConfig {
         }
 
         let existing = Accounts::list_agents()?;
+
         if let Some(first) = existing.first() {
             self.active_agent_account = Some(first.clone());
             return Ok(first.clone());
@@ -112,6 +115,7 @@ impl McpConfig {
         };
 
         Accounts::create_agent(&candidate)?;
+
         self.active_agent_account = Some(candidate.clone());
         Ok(candidate)
     }
@@ -132,6 +136,7 @@ impl McpPermission {
     pub fn parse(mode: &str) -> Result<Self, String> {
         let trimmed = mode.trim();
         let bytes = trimmed.as_bytes();
+
         if bytes.len() != 3 || !bytes.iter().all(|b| *b == b'0' || *b == b'1') {
             return Err(
                 "Invalid permission format. Use a 3-digit binary value between 000 and 111 (hundreds: account create, tens: write/delete, ones: read)."

@@ -24,5 +24,8 @@ fn description_validation_blocks_control_and_formatting_chars() {
 fn printable_sanitizer_escapes_terminal_injection_sequences() {
     assert_eq!(Validation::printable("safe text"), "safe text");
     assert_eq!(Validation::printable("esc\u{1b}[31m"), "esc\\u{1b}[31m");
-    assert_eq!(Validation::printable("rtl\u{202e}override"), "rtl\\u{202e}override");
+    assert_eq!(
+        Validation::printable("rtl\u{202e}override"),
+        "rtl\\u{202e}override"
+    );
 }

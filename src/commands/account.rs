@@ -132,9 +132,10 @@ impl Account {
         let warning_message = format!(
             "This will permanently delete account '{account_name}' and all its stored passwords!"
         );
-        Security::confirmation(&warning_message)?;
 
+        Security::confirmation(&warning_message)?;
         let was_active = Accounts::delete(&account_name)?;
+
         if was_active {
             Session::clear_session()?;
             Config::clear_cache();

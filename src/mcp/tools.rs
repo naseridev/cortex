@@ -30,6 +30,7 @@ impl McpTools {
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
+
         let args = params
             .get("arguments")
             .cloned()

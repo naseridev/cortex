@@ -320,6 +320,7 @@ impl Storage {
         {
             txn.delete_table(VAULT)?;
             let mut table = txn.open_table(VAULT)?;
+
             for (name, value) in &snapshot.entries {
                 if name.as_slice() != FAILED_ATTEMPTS_KEY.as_bytes() {
                     table.insert(name.as_slice(), value.as_slice())?;
@@ -390,6 +391,7 @@ impl Storage {
         let Some(active) = Accounts::active()? else {
             return Ok(false);
         };
+
         Accounts::db_file_exists(&active)
     }
 

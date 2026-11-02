@@ -36,6 +36,7 @@ impl McpServer {
     fn read_rpc_message<R: BufRead>(reader: &mut R) -> Result<Option<String>, io::Error> {
         let mut line = String::new();
         let bytes = reader.read_line(&mut line)?;
+
         if bytes == 0 {
             return Ok(None);
         }
@@ -54,6 +55,7 @@ impl McpServer {
 
             let mut buf = vec![0u8; content_len];
             reader.read_exact(&mut buf)?;
+
             let body = String::from_utf8_lossy(&buf).into_owned();
             return Ok(Some(body));
         }
@@ -81,6 +83,7 @@ impl McpServer {
                     .get("protocolVersion")
                     .and_then(Value::as_str)
                     .unwrap_or(PROTOCOL_VERSION);
+
                 let res = json!({
                     "protocolVersion": client_version,
                     "capabilities": {
@@ -93,6 +96,7 @@ impl McpServer {
                         "version": "4.0.0"
                     }
                 });
+
                 Some(Self::rpc_result(id.as_ref().unwrap_or(&Value::Null), &res))
             }
             "notifications/initialized" | "notifications/cancelled" => None,

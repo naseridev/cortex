@@ -177,6 +177,7 @@ impl Import {
                     } else {
                         created.push(entry.name.clone());
                     }
+
                     prepared.push((entry.name.clone(), stored));
                 }
                 Err(error) => {
@@ -193,6 +194,7 @@ impl Import {
         for name in &created {
             println!("Imported: {name}");
         }
+
         for name in &updated {
             println!("Updated: {name}");
         }
@@ -203,6 +205,7 @@ impl Import {
         if skipped > 0 {
             println!("  Skipped: {skipped}");
         }
+
         if failed > 0 {
             println!("  Failed: {failed}");
         }

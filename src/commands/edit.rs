@@ -52,7 +52,6 @@ impl Edit {
         };
 
         let current_tag_list = (!current_tags.is_empty()).then_some(&current_tags);
-
         let no_changes = new_password.as_str() == current_password.as_str()
             && description == current_description_text
             && tag_list.as_ref() == current_tag_list;

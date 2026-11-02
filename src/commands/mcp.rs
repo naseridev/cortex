@@ -42,13 +42,16 @@ impl Mcp {
             config.permission,
             config.describe_permission()?
         );
+
         println!(
             "Sandbox (agent isolation): {}",
             if config.sandbox { "on" } else { "off" }
         );
+
         if let Some(account) = &config.active_agent_account {
             println!("Active agent account: {account} [agent]");
         }
+
         println!("\nAdd this to your MCP client configuration:\n\n{snippet}");
 
         Ok(())
@@ -129,10 +132,12 @@ impl Mcp {
             config.permission,
             config.describe_permission()?
         );
+
         println!(
             "  Sandbox (agent isolation): {}",
             if config.sandbox { "on" } else { "off" }
         );
+
         println!(
             "  Active agent account: {}",
             config.active_agent_account.as_deref().unwrap_or("none")

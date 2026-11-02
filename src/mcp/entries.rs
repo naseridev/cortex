@@ -34,6 +34,7 @@ impl McpEntries {
             let tags = crypto
                 .decrypt_tags(&name, &entry)
                 .map_err(|e| e.to_string())?;
+
             items.push(json!({
                 "name": name,
                 "description": description,
@@ -46,6 +47,7 @@ impl McpEntries {
             "count": items.len(),
             "entries": items
         });
+
         serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
     }
 
@@ -63,9 +65,11 @@ impl McpEntries {
             .decrypt_entry(&name, &entry)
             .map_err(|e| e.to_string())?;
         let password = Zeroizing::new(decode_secret_text(decrypted).map_err(|e| e.to_string())?);
+
         let description = crypto
             .decrypt_description(&name, &entry)
             .map_err(|e| e.to_string())?;
+
         let tags = crypto
             .decrypt_tags(&name, &entry)
             .map_err(|e| e.to_string())?;
@@ -77,16 +81,19 @@ impl McpEntries {
             "description": description,
             "tags": tags
         });
+
         serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
     }
 
     pub fn search(config: &McpConfig, perm: McpPermission, args: &Value) -> Result<String, String> {
         McpGuard::require_read(perm)?;
+
         let pattern = McpGuard::required_str(args, "pattern")?;
         let ignore_case = args
             .get("ignore_case")
             .and_then(Value::as_bool)
             .unwrap_or(true);
+
         let names_only = args
             .get("names_only")
             .and_then(Value::as_bool)
@@ -111,6 +118,7 @@ impl McpEntries {
             } else {
                 crypto.decrypt_description(&name, &entry).ok().flatten()
             };
+
             let desc_matched = description.as_deref().is_some_and(|d| regex.is_match(d));
             let tags = crypto.decrypt_tags(&name, &entry).unwrap_or_default();
             let tag_matched = !names_only && tags.iter().any(|t| regex.is_match(t));
@@ -129,11 +137,13 @@ impl McpEntries {
             "count": matches.len(),
             "matches": matches
         });
+
         serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())
     }
 
     pub fn create(config: &McpConfig, perm: McpPermission, args: &Value) -> Result<String, String> {
         McpGuard::require_write(perm)?;
+
         let name = McpGuard::required_str(args, "name")?;
         Validation::check_account_name(&name)?;
 
@@ -156,6 +166,7 @@ impl McpEntries {
             if desc.len() > MAX_DESCRIPTION_BYTES {
                 return Err(format!("Description exceeds {MAX_DESCRIPTION_BYTES} bytes"));
             }
+
             Validation::check_description_text(desc)?;
             Password::in_desc_check(password.as_str(), desc).map_err(|e| e.to_string())?;
         }
@@ -200,6 +211,7 @@ impl McpEntries {
             )
             .map_err(|e| e.to_string())?,
         );
+
         let current_description = crypto
             .decrypt_description(&name, &existing)
             .map_err(|e| e.to_string())?;
@@ -271,6 +283,7 @@ impl McpEntries {
 
     pub fn delete(config: &McpConfig, perm: McpPermission, args: &Value) -> Result<String, String> {
         McpGuard::require_write(perm)?;
+
         let name = McpGuard::required_str(args, "name")?;
         if Validation::is_reserved_or_blank(&name) {
             return Err("Cannot delete system or empty entries".to_string());
@@ -297,6 +310,7 @@ impl McpEntries {
             if raw.len() > MAX_PASSWORD_BYTES {
                 return Err(format!("Password exceeds {MAX_PASSWORD_BYTES} bytes"));
             }
+
             Password::length_check(raw, MIN_ACCOUNT_PASSWORD_LENGTH).map_err(|e| e.to_string())?;
             Ok(Zeroizing::new(raw.to_string()))
         } else {
@@ -308,17 +322,20 @@ impl McpEntries {
                 })?,
                 None => DEFAULT_GENERATED_LENGTH,
             };
+
             if !(MIN_ACCOUNT_PASSWORD_LENGTH..=MAX_PASSWORD_BYTES).contains(&length) {
                 return Err(format!(
                     "Generated password length must be between {MIN_ACCOUNT_PASSWORD_LENGTH} and {MAX_PASSWORD_BYTES}"
                 ));
             }
+
             let charset = PasswordCharset::from_bits(
                 PasswordCharset::UPPERCASE
                     | PasswordCharset::LOWERCASE
                     | PasswordCharset::DIGITS
                     | PasswordCharset::SPECIAL,
             );
+
             Ok(Zeroizing::new(Password::generate(length, charset)?))
         }
     }

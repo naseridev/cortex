@@ -6,7 +6,6 @@ pub struct List;
 impl List {
     pub fn execute(show_tags: bool) -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login_with_session()?;
-
         let mut entries = Vec::new();
 
         for (name, entry) in storage.list_entries()? {

@@ -28,6 +28,7 @@ impl McpGuard {
                         "Sandbox mode is enabled: access to non-agent account '{name}' is forbidden. Only [agent] accounts can be accessed."
                     ));
                 }
+
                 name
             } else {
                 Self::resolve_sandbox_account(config, perm)?
@@ -45,6 +46,7 @@ impl McpGuard {
             let created = cfg
                 .ensure_default_agent_account()
                 .map_err(|e| e.to_string())?;
+
             let _ = cfg.save();
             created
         } else {
@@ -70,6 +72,7 @@ impl McpGuard {
         }
 
         let existing = Accounts::list_agents().map_err(|e| e.to_string())?;
+
         if let Some(first) = existing.first() {
             let mut updated = config.clone();
             updated.active_agent_account = Some(first.clone());
@@ -88,6 +91,7 @@ impl McpGuard {
         let created = updated
             .ensure_default_agent_account()
             .map_err(|e| e.to_string())?;
+
         updated.save().map_err(|e| e.to_string())?;
         Ok(created)
     }
@@ -113,6 +117,7 @@ impl McpGuard {
                 .map(str::to_string)
                 .collect();
             let normalized = TagValidator::normalize(&collected);
+
             TagValidator::validate(&normalized).map_err(|e| e.to_string())?;
             return Ok(Some(normalized));
         }

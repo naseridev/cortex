@@ -17,6 +17,7 @@ impl List {
                     continue;
                 }
             };
+
             let tags = if show_tags {
                 match crypto.decrypt_tags(&name, &entry) {
                     Ok(tags) => tags,
@@ -28,6 +29,7 @@ impl List {
             } else {
                 Vec::new()
             };
+
             entries.push((name, description, tags));
         }
 
@@ -37,9 +39,11 @@ impl List {
             for (name, description, tags) in entries {
                 println!();
                 println!("Entry: {}", Validation::printable(&name));
+
                 if let Some(desc) = &description {
                     println!("Description: {}", Validation::printable(desc));
                 }
+
                 if show_tags && !tags.is_empty() {
                     println!("Tags: {}", tags.join(", "));
                 }

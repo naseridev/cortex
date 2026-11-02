@@ -1,8 +1,8 @@
 use crate::{
     core::{config::Config, crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage},
+    modules::security::Security,
     modules::session::Session,
     ui::prompt::UserPrompt,
-    modules::security::Security,
 };
 use std::{fs, path::Path};
 
@@ -25,6 +25,7 @@ impl Restore {
         let password = UserPrompt::password("Master password used when this dump was created: ")?;
         let crypto = Crypto::open(&password, &file.salt)?;
         let snapshot = Storage::read_dump(&file, &crypto)?;
+
         println!(
             "Dump is valid and contains {} entries.",
             snapshot.user_count()
@@ -36,6 +37,7 @@ impl Restore {
 
         let storage = Storage::new()?;
         storage.replace_with_dump(&snapshot)?;
+
         Session::clear_session()?;
         Config::clear_cache();
 

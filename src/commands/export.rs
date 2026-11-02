@@ -1,14 +1,13 @@
 use crate::{
     core::{
         crypto::Crypto,
+        interchange,
         limits::MAX_ENTRIES,
         platform,
         storage::{Storage, decode_value},
         types::{ExportEntry, PasswordEntry, decode_secret_text},
     },
-    core::interchange,
-    modules::gateway::Gateway,
-    modules::security::Security,
+    modules::{gateway::Gateway, security::Security},
 };
 use rand::RngExt;
 use std::{
@@ -41,33 +40,47 @@ impl Export {
             println!("No entries to export.");
             return Ok(());
         }
+
         collected.entries.sort_by(|a, b| a.name.cmp(&b.name));
-        let rejected = collected
-            .entries
-            .iter()
-            .filter(|entry| interchange::would_fail_import(entry))
-            .count();
-        if rejected > 0 {
-            eprintln!(
-                "Warning: {rejected} entr{} would be rejected on import (short password or control characters). Update {} with edit before relying on this export.",
-                if rejected == 1 { "y" } else { "ies" },
-                if rejected == 1 { "it" } else { "them" }
-            );
-        }
+        Self::warn_about_rejected_entries(&collected.entries);
 
         Self::export_csv(&collected.entries)
     }
 
+    fn warn_about_rejected_entries(entries: &[ExportEntry]) {
+        let rejected = entries
+            .iter()
+            .filter(|entry| interchange::would_fail_import(entry))
+            .count();
+        if rejected == 0 {
+            return;
+        }
+
+        let (entry_suffix, pronoun) = if rejected == 1 {
+            ("y", "it")
+        } else {
+            ("ies", "them")
+        };
+
+        eprintln!(
+            "Warning: {rejected} entr{entry_suffix} would be rejected on import (short password or control characters). Update {pronoun} with edit before relying on this export."
+        );
+    }
+
     fn export_csv(entries: &[ExportEntry]) -> Result<(), Box<dyn std::error::Error>> {
         let output = PathBuf::from(format!("cortex_export_{}.csv", Self::random_token()));
+
         let mut bytes = interchange::encode_csv(entries)?;
         let written = Self::write_atomically(&output, &bytes);
+
         bytes.zeroize();
         written?;
+
         eprintln!(
             "\nPlaintext CSV export completed with {} entries",
             entries.len()
         );
+
         println!("\nExport saved to: {}", output.display());
         println!(
             "The file is NOT encrypted. Keep it safe and delete it when you no longer need it."
@@ -87,7 +100,9 @@ impl Export {
         let mut collected = Collected {
             entries: Vec::new(),
         };
+
         let mut problems = Vec::new();
+
         for (key, value) in &records {
             match Self::decode_entry(crypto, key, value) {
                 Ok(Some(entry)) => collected.entries.push(entry),
@@ -106,6 +121,7 @@ impl Export {
             for problem in &problems {
                 eprintln!("  - {problem}");
             }
+
             return Err(format!(
                 "Export aborted: {} problem(s) found, no file was written",
                 problems.len()
@@ -131,11 +147,13 @@ impl Export {
         let password_bytes = crypto
             .decrypt_entry(&name, &entry)
             .map_err(|error| format!("Failed to decrypt entry '{name}': {error}"))?;
+
         let password = decode_secret_text(password_bytes)
             .map_err(|error| format!("Failed to decrypt entry '{name}': {error}"))?;
         let description = crypto
             .decrypt_description(&name, &entry)
             .map_err(|error| format!("Failed to decrypt description of '{name}': {error}"))?;
+
         let tags = crypto
             .decrypt_tags(&name, &entry)
             .map_err(|error| format!("Failed to decrypt tags of '{name}': {error}"))?;
@@ -155,9 +173,12 @@ impl Export {
     fn write_atomically(output: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let directory = std::env::current_dir()?;
         let mut temp = tempfile::NamedTempFile::new_in(&directory)?;
+
         temp.write_all(bytes)?;
         temp.as_file().sync_all()?;
+
         platform::restrict_to_owner(temp.path())?;
+
         temp.persist_noclobber(output).map_err(|error| {
             if error.error.kind() == io::ErrorKind::AlreadyExists {
                 format!("File already exists: {}", output.display())
@@ -169,6 +190,7 @@ impl Export {
                 )
             }
         })?;
+
         Ok(())
     }
 }

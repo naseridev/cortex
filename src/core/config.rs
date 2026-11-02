@@ -29,6 +29,7 @@ impl Config {
             default_config.save_to_db(storage)?;
             default_config
         };
+
         Self::update_cache(config.clone())?;
         Ok(config)
     }
@@ -56,6 +57,7 @@ impl Config {
             .lock()
             .map_err(|_| "Failed to acquire cache lock")?;
         *cached = Some(config);
+
         Ok(())
     }
 

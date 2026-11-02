@@ -1,6 +1,11 @@
 use rand::seq::{IndexedRandom, SliceRandom};
 
 const SPECIAL_CHARACTERS: &str = "!@#$%^&*()_+-=[]{}|;:,.<>?";
+const LOWERCASE_CHARS: &str = "abcdefghijklmnopqrstuvwxyz";
+const UPPERCASE_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const DIGIT_CHARS: &str = "0123456789";
+const MIN_MASTER_PASSWORD_CHARS: usize = 8;
+const MIN_COMPARED_CHARS: usize = 3;
 
 #[derive(Clone, Copy)]
 pub struct PasswordCharset(u8);
@@ -41,51 +46,26 @@ pub struct Password;
 
 impl Password {
     pub fn generate(length: usize, charset: PasswordCharset) -> Result<String, String> {
-        let mut pool = Vec::new();
-        let mut required_chars = Vec::new();
-
         let any_flag_set =
             charset.uppercase() || charset.lowercase() || charset.digits() || charset.special();
+        let include_when_selected = |selected: bool| !any_flag_set || selected;
 
-        let use_lowercase = if any_flag_set {
-            charset.lowercase()
-        } else {
-            true
-        };
-        let use_uppercase = if any_flag_set {
-            charset.uppercase()
-        } else {
-            true
-        };
-        let use_digits = if any_flag_set { charset.digits() } else { true };
-        let use_special = if any_flag_set {
-            charset.special()
-        } else {
-            true
-        };
+        let classes = [
+            (include_when_selected(charset.lowercase()), LOWERCASE_CHARS),
+            (include_when_selected(charset.uppercase()), UPPERCASE_CHARS),
+            (include_when_selected(charset.digits()), DIGIT_CHARS),
+            (include_when_selected(charset.special()), SPECIAL_CHARACTERS),
+        ];
 
-        if use_lowercase {
-            let lower: Vec<char> = "abcdefghijklmnopqrstuvwxyz".chars().collect();
-            required_chars.push(Self::pick_random_char(&lower)?);
-            pool.extend_from_slice(&lower);
-        }
+        let mut pool: Vec<char> = Vec::new();
+        let mut required_chars: Vec<char> = Vec::new();
 
-        if use_uppercase {
-            let upper: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect();
-            required_chars.push(Self::pick_random_char(&upper)?);
-            pool.extend_from_slice(&upper);
-        }
-
-        if use_digits {
-            let nums: Vec<char> = "0123456789".chars().collect();
-            required_chars.push(Self::pick_random_char(&nums)?);
-            pool.extend_from_slice(&nums);
-        }
-
-        if use_special {
-            let specs: Vec<char> = SPECIAL_CHARACTERS.chars().collect();
-            required_chars.push(Self::pick_random_char(&specs)?);
-            pool.extend_from_slice(&specs);
+        for (enabled, class) in classes {
+            if enabled {
+                let class_chars: Vec<char> = class.chars().collect();
+                required_chars.push(Self::pick_random_char(&class_chars)?);
+                pool.extend_from_slice(&class_chars);
+            }
         }
 
         if pool.is_empty() {
@@ -97,27 +77,19 @@ impl Password {
         }
 
         let mut rng = rand::rng();
-        let mut password_chars = Vec::with_capacity(length);
+        let fill_count = length - required_chars.len();
+        let mut password_chars = required_chars;
 
-        for &ch in &required_chars {
-            password_chars.push(ch);
-        }
-
-        for _ in required_chars.len()..length {
+        for _ in 0..fill_count {
             let &ch = pool.choose(&mut rng).ok_or("No character types selected")?;
             password_chars.push(ch);
         }
 
         password_chars.shuffle(&mut rng);
-
         Ok(password_chars.into_iter().collect())
     }
 
     fn pick_random_char(chars: &[char]) -> Result<char, String> {
-        if chars.is_empty() {
-            return Err("Empty charset".to_string());
-        }
-
         let mut rng = rand::rng();
         chars
             .choose(&mut rng)
@@ -126,36 +98,34 @@ impl Password {
     }
 
     pub fn security_check(password: &str) -> Result<(), String> {
-        if password.chars().count() < 8 {
-            return Err("Password must be at least 8 characters long".to_string());
-        }
-
-        let mut missing = Vec::new();
-
-        if !password.chars().any(char::is_lowercase) {
-            missing.push("lowercase letter");
-        }
-
-        if !password.chars().any(char::is_uppercase) {
-            missing.push("uppercase letter");
-        }
-
-        if !password.chars().any(|c| c.is_ascii_digit()) {
-            missing.push("digit");
-        }
-
-        if !password.chars().any(|c| SPECIAL_CHARACTERS.contains(c)) {
-            missing.push("special character");
-        }
-
-        if !missing.is_empty() {
+        if password.chars().count() < MIN_MASTER_PASSWORD_CHARS {
             return Err(format!(
-                "Your password needs improvement.\nMissing: {}",
-                missing.join(", ")
+                "Password must be at least {MIN_MASTER_PASSWORD_CHARS} characters long"
             ));
         }
 
-        Ok(())
+        let missing: Vec<&str> = [
+            (password.chars().any(char::is_lowercase), "lowercase letter"),
+            (password.chars().any(char::is_uppercase), "uppercase letter"),
+            (password.chars().any(|c| c.is_ascii_digit()), "digit"),
+            (
+                password.chars().any(|c| SPECIAL_CHARACTERS.contains(c)),
+                "special character",
+            ),
+        ]
+        .into_iter()
+        .filter(|(present, _)| !*present)
+        .map(|(_, label)| label)
+        .collect();
+
+        if missing.is_empty() {
+            return Ok(());
+        }
+
+        Err(format!(
+            "Your password needs improvement.\nMissing: {}",
+            missing.join(", ")
+        ))
     }
 
     pub fn match_check(
@@ -184,11 +154,13 @@ impl Password {
         let password_chars: Vec<char> = password.to_lowercase().chars().collect();
         let description_lower = description.to_lowercase();
 
-        if password_chars.len() < 3 || description_lower.chars().count() < 3 {
+        if password_chars.len() < MIN_COMPARED_CHARS
+            || description_lower.chars().count() < MIN_COMPARED_CHARS
+        {
             return false;
         }
 
-        let window_size = (password_chars.len() / 2).max(3);
+        let window_size = (password_chars.len() / 2).max(MIN_COMPARED_CHARS);
         password_chars.windows(window_size).any(|window| {
             let fragment: String = window.iter().collect();
             description_lower.contains(&fragment)

@@ -1,4 +1,7 @@
-use crate::core::{limits::MAX_NAME_BYTES, storage::Storage};
+use crate::core::{
+    limits::MAX_NAME_BYTES,
+    storage::{RESERVED_PREFIX, Storage},
+};
 
 pub struct Validation;
 
@@ -34,15 +37,22 @@ impl Validation {
         Ok(())
     }
 
+    #[must_use]
+    pub fn is_reserved_or_blank(name: &str) -> bool {
+        name.trim().is_empty() || name.starts_with(RESERVED_PREFIX)
+    }
+
     pub fn check_account_name(name: &str) -> Result<(), String> {
-        if name.trim().is_empty() || name.starts_with("__") || name.len() > MAX_NAME_BYTES {
+        if Self::is_reserved_or_blank(name) || name.len() > MAX_NAME_BYTES {
             return Err("Invalid account name".to_string());
         }
+
         if name.chars().any(is_unsafe_char) {
             return Err(
                 "Account name contains a control or hidden formatting character".to_string(),
             );
         }
+
         Ok(())
     }
 
@@ -52,12 +62,14 @@ impl Validation {
                 "Description contains a control or hidden formatting character".to_string(),
             );
         }
+
         Ok(())
     }
 
     #[must_use]
     pub fn printable(text: &str) -> String {
         let mut output = String::with_capacity(text.len());
+
         for ch in text.chars() {
             if is_unsafe_char(ch) {
                 output.extend(ch.escape_default());
@@ -65,6 +77,7 @@ impl Validation {
                 output.push(ch);
             }
         }
+
         output
     }
 }

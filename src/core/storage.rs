@@ -14,6 +14,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use zeroize::Zeroize;
 
+pub const RESERVED_PREFIX: &str = "__";
+
 const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
 const DB_FILE: &str = "vault.redb";
 const LEGACY_DB_DIR: &str = ".password-store";
@@ -26,6 +28,8 @@ const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
 const MANIFEST_KEY: &str = "__manifest__";
 const DUMP_PREFIX: &str = "dump_";
 const DUMP_SUFFIX: &str = ".bin";
+const MAX_SEARCH_PATTERN_BYTES: usize = 100;
+
 const INVALID_DUMP_MESSAGE: &str = "Dump content is invalid or damaged.";
 const WRONG_PASSWORD_OR_DAMAGED_MESSAGE: &str = "Wrong master password or damaged dump file.";
 const DUMP_HEADER_MISMATCH_MESSAGE: &str = "Dump header does not match its contents.";
@@ -92,6 +96,7 @@ impl Storage {
         let txn = db.begin_write()?;
         txn.open_table(VAULT)?;
         txn.commit()?;
+
         Ok(Self {
             db,
             integrity: Cell::new(None),
@@ -104,11 +109,10 @@ impl Storage {
 
     pub fn init_db(&self, crypto: &Crypto, salt: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         self.bind_integrity(crypto);
-        let meta = [
-            (INIT_MARKER, crypto.verification()),
-            (SALT_KEY, salt.to_vec()),
-        ];
-        self.commit(&Changes::new(), &meta)
+        self.commit(
+            &Changes::new(),
+            &Self::initialization_metadata(crypto, salt),
+        )
     }
 
     pub fn atomic_reset(
@@ -119,26 +123,24 @@ impl Storage {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut changes = Changes::new();
         for (key, _) in self.records()? {
-            if !key.starts_with(b"__") {
+            if !is_reserved_key(&key) {
                 changes.insert(key, None);
             }
         }
+
         for (name, entry) in entries {
             changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
         }
 
         self.set_integrity(Some(crypto.integrity_key()));
-        let meta = [
-            (INIT_MARKER, crypto.verification()),
-            (SALT_KEY, salt.to_vec()),
-        ];
-        self.commit(&changes, &meta)
+        self.commit(&changes, &Self::initialization_metadata(crypto, salt))
     }
 
     pub fn verify_integrity(&self) -> Result<(), Box<dyn std::error::Error>> {
         let key = self.integrity_key()?;
         let records = self.records()?;
         let expected = digest_records(&key, &records, &Changes::new());
+
         match self.get_raw(MANIFEST_KEY.as_bytes())? {
             Some(stored) => {
                 let stored_bytes =
@@ -150,7 +152,7 @@ impl Storage {
                 }
             }
             None => {
-                if records.iter().any(|(name, _)| !name.starts_with(b"__")) {
+                if records.iter().any(|(name, _)| !is_reserved_key(name)) {
                     Err(LEGACY_VAULT_MESSAGE.into())
                 } else {
                     Ok(())
@@ -195,9 +197,7 @@ impl Storage {
             return Ok(false);
         }
 
-        let mut changes = Changes::new();
-        changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
-        self.commit(&changes, &[])?;
+        self.commit_single(name, Some(encode_value(entry)?))?;
         Ok(true)
     }
 
@@ -210,9 +210,11 @@ impl Storage {
             Self::check_writable_name(name)?;
             changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
         }
+
         if changes.is_empty() {
             return Ok(());
         }
+
         self.commit(&changes, &[])
     }
 
@@ -220,7 +222,7 @@ impl Storage {
         &self,
         name: &str,
     ) -> Result<Option<PasswordEntry>, Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
+        if is_reserved_name(name) {
             return Ok(None);
         }
 
@@ -237,9 +239,10 @@ impl Storage {
     }
 
     pub fn delete_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
+        if is_reserved_name(name) {
             return Err("Cannot delete system entries".into());
         }
+
         if name.is_empty() {
             return Err("Empty name not allowed".into());
         }
@@ -248,9 +251,7 @@ impl Storage {
             return Ok(false);
         }
 
-        let mut changes = Changes::new();
-        changes.insert(name.as_bytes().to_vec(), None);
-        self.commit(&changes, &[])?;
+        self.commit_single(name, None)?;
         Ok(true)
     }
 
@@ -259,7 +260,7 @@ impl Storage {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
+        if is_reserved_name(name) {
             return Ok(false);
         }
 
@@ -267,9 +268,7 @@ impl Storage {
             return Ok(false);
         }
 
-        let mut changes = Changes::new();
-        changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
-        self.commit(&changes, &[])?;
+        self.commit_single(name, Some(encode_value(entry)?))?;
         Ok(true)
     }
 
@@ -281,7 +280,7 @@ impl Storage {
             return Err("Search pattern cannot be empty".into());
         }
 
-        if pattern.len() > 100 {
+        if pattern.len() > MAX_SEARCH_PATTERN_BYTES {
             return Err("Search pattern too long (max 100 chars)".into());
         }
 
@@ -297,7 +296,7 @@ impl Storage {
                 }
             };
 
-            if key_str.starts_with("__") {
+            if is_reserved_name(&key_str) {
                 continue;
             }
 
@@ -322,7 +321,8 @@ impl Storage {
 
         for (key, value) in self.records()? {
             let key_str = String::from_utf8(key)?;
-            if !key_str.starts_with("__") {
+
+            if !is_reserved_name(&key_str) {
                 let entry: PasswordEntry = decode_value(&value)?;
                 entries.push((key_str, entry));
             }
@@ -333,16 +333,20 @@ impl Storage {
 
     pub fn purge_database(&self) -> Result<(), Box<dyn std::error::Error>> {
         let txn = self.db.begin_write()?;
+
         txn.delete_table(VAULT)?;
         txn.commit()?;
 
         let db_path = Self::get_db_path()?;
+
         if let Some(parent) = db_path.parent() {
             for directory in [DUMP_DIR, LEGACY_BACKUP_DIR, LEGACY_DB_DIR] {
                 let _ = fs::remove_dir_all(parent.join(directory));
             }
+
             let _ = fs::remove_file(parent.join(LOCK_FILE));
         }
+
         let _ = fs::remove_file(&db_path);
 
         Ok(())
@@ -361,16 +365,18 @@ impl Storage {
         let mut plain = crypto
             .open_dump(&file.nonce, &file.ciphertext)
             .map_err(|_| WRONG_PASSWORD_OR_DAMAGED_MESSAGE)?;
+
         let parsed: Result<Records, String> = decode_value(&plain);
         plain.zeroize();
-        let entries = parsed.map_err(|_| INVALID_DUMP_MESSAGE)?;
 
+        let entries = parsed.map_err(|_| INVALID_DUMP_MESSAGE)?;
         let find = |key: &str| -> Option<&[u8]> {
             entries
                 .iter()
                 .find(|(name, _)| name.as_slice() == key.as_bytes())
                 .map(|(_, value)| value.as_slice())
         };
+
         let init = find(INIT_MARKER).ok_or(INVALID_DUMP_MESSAGE)?;
         let salt = find(SALT_KEY).ok_or(INVALID_DUMP_MESSAGE)?;
         let manifest = find(MANIFEST_KEY).ok_or(INVALID_DUMP_MESSAGE)?;
@@ -378,19 +384,23 @@ impl Storage {
         if salt != file.salt.as_slice() {
             return Err(DUMP_HEADER_MISMATCH_MESSAGE.into());
         }
+
         if !crypto.matches_verification(init) {
             return Err(WRONG_PASSWORD_OR_DAMAGED_MESSAGE.into());
         }
+
         let stored_manifest = <[u8; 32]>::try_from(manifest).map_err(|_| INVALID_DUMP_MESSAGE)?;
         let expected = snapshot_digest(&crypto.integrity_key(), &entries);
+
         if blake3::Hash::from(stored_manifest) != expected {
             return Err(DUMP_INTEGRITY_MESSAGE.into());
         }
 
         let user_count = entries
             .iter()
-            .filter(|(name, _)| !name.starts_with(b"__"))
+            .filter(|(name, _)| !is_reserved_key(name))
             .count();
+
         Ok(Snapshot {
             entries,
             user_count,
@@ -408,6 +418,7 @@ impl Storage {
                 }
             }
         }
+
         txn.commit()
             .map_err(|error| format!("Failed to restore database: {error}"))?;
         Ok(())
@@ -416,6 +427,7 @@ impl Storage {
     pub fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(VAULT)?;
+
         Ok(table.get(key)?.map(|guard| guard.value().to_vec()))
     }
 
@@ -425,6 +437,7 @@ impl Storage {
             let mut table = txn.open_table(VAULT)?;
             table.insert(key, value)?;
         }
+
         txn.commit()?;
         Ok(())
     }
@@ -435,6 +448,7 @@ impl Storage {
             let mut table = txn.open_table(VAULT)?;
             table.remove(key)?;
         }
+
         txn.commit()?;
         Ok(())
     }
@@ -442,11 +456,14 @@ impl Storage {
     pub(crate) fn records(&self) -> Result<Records, Box<dyn std::error::Error>> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(VAULT)?;
+
         let mut records = Vec::new();
+
         for item in table.iter()? {
             let (key, value) = item?;
             records.push((key.value().to_vec(), value.value().to_vec()));
         }
+
         Ok(records)
     }
 
@@ -462,24 +479,28 @@ impl Storage {
         let salt = self
             .get_salt()?
             .ok_or("Database salt not found. Database may be corrupted.")?;
+
         let snapshot = self.records()?;
         let mut plain = encode_value(&snapshot)?;
+
         drop(snapshot);
+
         let sealed = crypto.seal_dump(&plain);
         plain.zeroize();
-        let (ciphertext, nonce) = sealed?;
 
+        let (ciphertext, nonce) = sealed?;
         let bytes = dump::encode(&DumpFile {
             salt,
             nonce,
             ciphertext,
         })?;
+
         let path = dump_dir.join(format!(
             "{DUMP_PREFIX}{:020}{DUMP_SUFFIX}",
             Self::dump_stamp()
         ));
-        Self::write_new_file(&path, &bytes)?;
 
+        Self::write_new_file(&path, &bytes)?;
         Ok(path)
     }
 
@@ -488,15 +509,18 @@ impl Storage {
         let mut temp = tempfile::NamedTempFile::new_in(directory).map_err(|error| {
             format!("Failed to create dump in {}: {error}", directory.display())
         })?;
+
         temp.write_all(bytes)
             .map_err(|error| format!("Failed to write dump {}: {error}", path.display()))?;
         temp.as_file()
             .sync_all()
             .map_err(|error| format!("Failed to write dump {}: {error}", path.display()))?;
+
         platform::restrict_to_owner(temp.path())
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
         temp.persist_noclobber(path)
             .map_err(|error| format!("Failed to save dump {}: {}", path.display(), error.error))?;
+
         Ok(())
     }
 
@@ -510,10 +534,12 @@ impl Storage {
         let mut path =
             platform::config_dir().ok_or("Could not determine the configuration directory")?;
         path.push("cortex");
+
         fs::create_dir_all(&path)
             .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
         platform::restrict_to_owner(&path)
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
+
         path.push(DB_FILE);
         Ok(path)
     }
@@ -536,9 +562,10 @@ impl Storage {
     }
 
     pub fn entry_exists(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if name.starts_with("__") {
+        if is_reserved_name(name) {
             return Ok(false);
         }
+
         Ok(self.get_raw(name.as_bytes())?.is_some())
     }
 
@@ -546,9 +573,11 @@ impl Storage {
         if name.is_empty() {
             return Err("Empty name not allowed".into());
         }
-        if name.starts_with("__") {
+
+        if is_reserved_name(name) {
             return Err("Reserved name prefix".into());
         }
+
         Ok(())
     }
 
@@ -564,6 +593,22 @@ impl Storage {
             .ok_or_else(|| "Storage is not bound to a vault key".into())
     }
 
+    fn initialization_metadata(crypto: &Crypto, salt: &[u8]) -> [(&'static str, Vec<u8>); 2] {
+        [
+            (INIT_MARKER, crypto.verification()),
+            (SALT_KEY, salt.to_vec()),
+        ]
+    }
+
+    fn commit_single(
+        &self,
+        name: &str,
+        value: Option<Vec<u8>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let changes = Changes::from([(name.as_bytes().to_vec(), value)]);
+        self.commit(&changes, &[])
+    }
+
     fn commit(
         &self,
         changes: &Changes,
@@ -574,10 +619,12 @@ impl Storage {
         {
             let mut table = txn.open_table(VAULT)?;
             let mut existing = Vec::new();
+
             for item in table.iter()? {
                 let (db_key, db_value) = item?;
                 existing.push((db_key.value().to_vec(), db_value.value().to_vec()));
             }
+
             let manifest = digest_records(&key, &existing, changes);
 
             for (name, value) in changes {
@@ -590,15 +637,26 @@ impl Storage {
                     }
                 }
             }
+
             for (name, value) in meta {
                 table.insert(name.as_bytes(), value.as_slice())?;
             }
+
             table.insert(MANIFEST_KEY.as_bytes(), manifest.as_bytes().as_slice())?;
         }
+
         txn.commit()
             .map_err(|error| format!("Failed to write database: {error}"))?;
         Ok(())
     }
+}
+
+fn is_reserved_name(name: &str) -> bool {
+    name.starts_with(RESERVED_PREFIX)
+}
+
+fn is_reserved_key(key: &[u8]) -> bool {
+    key.starts_with(RESERVED_PREFIX.as_bytes())
 }
 
 fn digest_records(
@@ -610,7 +668,7 @@ fn digest_records(
     let mut pending = changes.iter().peekable();
 
     for (db_key, db_value) in records {
-        if db_key.starts_with(b"__") {
+        if is_reserved_key(db_key) {
             continue;
         }
 
@@ -651,14 +709,16 @@ fn feed_change(hasher: &mut blake3::Hasher, name: &[u8], value: Option<&[u8]>) {
 fn snapshot_digest(key: &[u8; 32], entries: &[(Vec<u8>, Vec<u8>)]) -> blake3::Hash {
     let mut records: Vec<&(Vec<u8>, Vec<u8>)> = entries
         .iter()
-        .filter(|(name, _)| !name.starts_with(b"__"))
+        .filter(|(name, _)| !is_reserved_key(name))
         .collect();
+
     records.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut hasher = blake3::Hasher::new_keyed(key);
     for (name, value) in records {
         feed_record(&mut hasher, name, value);
     }
+
     hasher.finalize()
 }
 

@@ -1,11 +1,11 @@
 use crate::{
     core::{
         crypto::Crypto,
+        interchange,
         limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
         types::{ExportEntry, PasswordEntry},
     },
-    core::interchange,
     modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
@@ -24,29 +24,40 @@ struct ImportSource {
 impl Import {
     pub fn execute(file_path: &str, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
         let source = Self::read_file(file_path)?;
-
-        println!("\nImport Summary:");
-        println!("  Format: {}", source.format);
-        if let Some(version) = &source.version {
-            println!("  Version: {version}");
-        }
-        if let Some(timestamp) = source.timestamp {
-            println!("  Timestamp: {timestamp}");
-        }
-        println!("  Total entries: {}", source.entries.len());
-        println!();
+        Self::print_summary(&source);
 
         let (storage, crypto) = Gateway::login()?;
         let (validated_entries, validation_errors) = Self::validate_entries(source.entries);
 
-        if !validation_errors.is_empty() {
-            eprintln!("\nValidation errors:");
-            for error in &validation_errors {
-                eprintln!("  - {error}");
-            }
+        Self::print_validation_errors(&validation_errors);
+        Self::apply_entries(&storage, &crypto, validated_entries, overwrite)
+    }
+
+    fn print_summary(source: &ImportSource) {
+        println!("\nImport Summary:");
+        println!("  Format: {}", source.format);
+
+        if let Some(version) = &source.version {
+            println!("  Version: {version}");
         }
 
-        Self::apply_entries(&storage, &crypto, validated_entries, overwrite)
+        if let Some(timestamp) = source.timestamp {
+            println!("  Timestamp: {timestamp}");
+        }
+
+        println!("  Total entries: {}", source.entries.len());
+        println!();
+    }
+
+    fn print_validation_errors(errors: &[String]) {
+        if errors.is_empty() {
+            return;
+        }
+
+        eprintln!("\nValidation errors:");
+        for error in errors {
+            eprintln!("  - {error}");
+        }
     }
 
     fn read_file(file_path: &str) -> Result<ImportSource, Box<dyn std::error::Error>> {
@@ -58,6 +69,7 @@ impl Import {
         let size = fs::metadata(path)
             .map_err(|_| format!("File not found: {file_path}"))?
             .len();
+
         if size > MAX_EXPORT_FILE_BYTES {
             return Err("Import file is too large".into());
         }
@@ -65,15 +77,18 @@ impl Import {
         let mut bytes =
             fs::read(path).map_err(|error| format!("Failed to read {file_path}: {error}"))?;
         let parsed = Self::parse_import(&bytes);
+
         bytes.zeroize();
         let source = parsed?;
 
         if source.entries.is_empty() {
             return Err("No entries found in import file".into());
         }
+
         if source.entries.len() > MAX_ENTRIES {
             return Err(format!("Too many entries to import (limit is {MAX_ENTRIES})").into());
         }
+
         Ok(source)
     }
 
@@ -92,6 +107,7 @@ impl Import {
                 let file = interchange::parse_encrypted(bytes)?;
                 let passphrase = UserPrompt::password("Export passphrase: ")?;
                 let data = interchange::open_encrypted(&passphrase, &file)?;
+
                 Ok(ImportSource {
                     format: "encrypted export",
                     version: Some(data.version),
@@ -131,8 +147,8 @@ impl Import {
         let mut prepared: Vec<(String, PasswordEntry)> = Vec::new();
         let mut created: Vec<String> = Vec::new();
         let mut updated: Vec<String> = Vec::new();
-        let mut skipped = 0;
-        let mut failed = 0;
+        let mut skipped: usize = 0;
+        let mut failed: usize = 0;
 
         for mut entry in entries {
             let exists = storage.entry_exists(&entry.name)?;
@@ -147,11 +163,7 @@ impl Import {
             }
 
             let secure_password = Zeroizing::new(std::mem::take(&mut entry.password));
-            let tag_list = if entry.tags.is_empty() {
-                None
-            } else {
-                Some(entry.tags.as_slice())
-            };
+            let tag_list = (!entry.tags.is_empty()).then_some(entry.tags.as_slice());
 
             match crypto.create_entry(
                 &entry.name,
@@ -187,6 +199,7 @@ impl Import {
 
         println!("\nImport completed:");
         println!("  Imported: {}", prepared.len());
+
         if skipped > 0 {
             println!("  Skipped: {skipped}");
         }

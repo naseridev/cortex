@@ -18,11 +18,15 @@ impl Session {
 
     pub fn save_session(vault_key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error>> {
         let mut record = [0u8; RECORD_BYTES];
+
         record[..TIMESTAMP_BYTES].copy_from_slice(&Time::current_timestamp().to_le_bytes());
         record[TIMESTAMP_BYTES..].copy_from_slice(vault_key);
+
         let stored = Self::entry()?.set_secret(&record);
+
         record.zeroize();
         stored?;
+
         Ok(())
     }
 
@@ -30,9 +34,11 @@ impl Session {
         let Ok(entry) = Self::entry() else {
             return Ok(None);
         };
+
         let Ok(mut record) = entry.get_secret() else {
             return Ok(None);
         };
+
         if record.len() != RECORD_BYTES {
             record.zeroize();
             Self::clear_session()?;
@@ -41,13 +47,16 @@ impl Session {
 
         let mut timestamp_bytes = [0u8; TIMESTAMP_BYTES];
         timestamp_bytes.copy_from_slice(&record[..TIMESTAMP_BYTES]);
+
         let timestamp = u64::from_le_bytes(timestamp_bytes);
         let mut key = [0u8; KEY_BYTES];
+
         key.copy_from_slice(&record[TIMESTAMP_BYTES..]);
         record.zeroize();
 
         let config = Config::load_from_db(storage)?;
         let elapsed = Time::current_timestamp().saturating_sub(timestamp);
+
         if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
             key.zeroize();
             Self::clear_session()?;
@@ -61,9 +70,11 @@ impl Session {
         let Ok(entry) = Self::entry() else {
             return Ok(());
         };
+
         if entry.get_secret().is_err() {
             return Ok(());
         }
+
         entry.delete_credential()?;
         Ok(())
     }

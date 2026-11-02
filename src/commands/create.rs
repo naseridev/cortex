@@ -1,6 +1,10 @@
 use crate::{
-    core::limits::MIN_ACCOUNT_PASSWORD_LENGTH,
-    core::{password::Password, tags::TagValidator, validation::Validation},
+    core::{
+        limits::{MAX_DESCRIPTION_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
+        password::Password,
+        tags::TagValidator,
+        validation::Validation,
+    },
     modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
@@ -13,7 +17,6 @@ impl Create {
         Validation::check_account_name(name)?;
 
         let (storage, crypto) = Gateway::login()?;
-
         Validation::account_exists_probe(
             &storage,
             name,
@@ -21,33 +24,19 @@ impl Create {
             "Account already exists. Use 'edit' to update or choose a different name.",
         )?;
 
-        let password = UserPrompt::password("Password to store: ")?;
-        Password::length_check(password.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
-
-        let confirm_password = UserPrompt::password("Confirm password: ")?;
-        Password::match_check(password.as_str(), confirm_password.as_str())?;
-
+        let password = Self::prompt_new_password()?;
         let description_input = Zeroizing::new(UserPrompt::text_with_limit(
             "Description (optional): ",
-            500,
+            MAX_DESCRIPTION_BYTES,
         )?);
+
         Validation::check_description_text(description_input.as_str())?;
         Password::in_desc_check(password.as_str(), description_input.as_str())?;
 
-        let description = if description_input.as_str().is_empty() {
-            None
-        } else {
-            Some(description_input.as_str())
-        };
-
-        let tag_list = if let Some(tag_string) = tags {
-            let parsed = TagValidator::parse_input(&tag_string);
-            let normalized = TagValidator::normalize(&parsed);
-            TagValidator::validate(&normalized)?;
-            Some(normalized)
-        } else {
-            None
-        };
+        let description = (!description_input.is_empty()).then_some(description_input.as_str());
+        let tag_list = tags
+            .map(|raw| TagValidator::parse_and_validate(&raw))
+            .transpose()?;
 
         let entry =
             crypto.create_entry(name, password.as_bytes(), description, tag_list.as_deref())?;
@@ -60,12 +49,21 @@ impl Create {
         }
 
         println!("Created '{name}'.");
-        if let Some(tags) = tag_list
-            && !tags.is_empty()
-        {
+
+        if let Some(tags) = tag_list.filter(|list| !list.is_empty()) {
             println!("Tags: {}", tags.join(", "));
         }
 
         Ok(())
+    }
+
+    fn prompt_new_password() -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+        let password = UserPrompt::password("Password to store: ")?;
+        Password::length_check(password.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
+
+        let confirmation = UserPrompt::password("Confirm password: ")?;
+        Password::match_check(password.as_str(), confirmation.as_str())?;
+
+        Ok(password)
     }
 }

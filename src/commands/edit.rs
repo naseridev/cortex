@@ -1,6 +1,11 @@
 use crate::{
-    core::{limits::MIN_ACCOUNT_PASSWORD_LENGTH, types::decode_secret_text},
-    core::{password::Password, tags::TagValidator, validation::Validation},
+    core::{
+        limits::{MAX_DESCRIPTION_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
+        password::Password,
+        tags::TagValidator,
+        types::decode_secret_text,
+        validation::Validation,
+    },
     modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
@@ -10,72 +15,47 @@ pub struct Edit;
 
 impl Edit {
     pub fn execute(name: &str, tags: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") || name.trim().is_empty() {
+        if Validation::is_reserved_or_blank(name) {
             return Err("Cannot edit system or empty entries".into());
         }
 
         let (storage, crypto) = Gateway::login()?;
-
         let entry = storage
             .get_password(name)?
             .ok_or_else(|| format!("Account '{name}' not found."))?;
 
-        let decrypted = crypto.decrypt_entry(name, &entry)?;
-        let current_password = Zeroizing::new(decode_secret_text(decrypted)?);
-        let current_desc = crypto
+        let current_password =
+            Zeroizing::new(decode_secret_text(crypto.decrypt_entry(name, &entry)?)?);
+        let current_description = crypto
             .decrypt_description(name, &entry)?
             .map(Zeroizing::new);
+
         let current_tags = crypto.decrypt_tags(name, &entry)?;
-
-        let new_password_input =
-            UserPrompt::optional_password("New password (Enter to keep current): ")?;
-
-        let new_password = match new_password_input {
-            None => Zeroizing::new(current_password.as_str().to_string()),
-            Some(input_pass) => {
-                Password::length_check(input_pass.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
-                let confirm_password = UserPrompt::password("Confirm new password: ")?;
-                Password::match_check(input_pass.as_str(), confirm_password.as_str())?;
-                input_pass
-            }
-        };
+        let new_password = Self::prompt_new_password(&current_password)?;
 
         let description_input = Zeroizing::new(UserPrompt::text_with_limit(
             "New description (Enter to keep current): ",
-            500,
+            MAX_DESCRIPTION_BYTES,
         )?);
 
-        let description = if description_input.as_str().is_empty() {
-            current_desc.as_ref().map(|value| value.as_str())
-        } else {
-            Validation::check_description_text(description_input.as_str())?;
-            Some(description_input.as_str())
-        };
+        let current_description_text = current_description.as_ref().map(|value| value.as_str());
+        let description =
+            Self::resolve_description(description_input.as_str(), current_description_text)?;
 
-        if let Some(desc) = description {
-            Password::in_desc_check(new_password.as_str(), desc)?;
+        if let Some(text) = description {
+            Password::in_desc_check(new_password.as_str(), text)?;
         }
 
-        let tag_list = if let Some(tag_string) = tags {
-            let parsed = TagValidator::parse_input(&tag_string);
-            let normalized = TagValidator::normalize(&parsed);
-            TagValidator::validate(&normalized)?;
-            Some(normalized)
-        } else if current_tags.is_empty() {
-            None
-        } else {
-            Some(current_tags.clone())
+        let tag_list = match tags {
+            Some(raw) => Some(TagValidator::parse_and_validate(&raw)?),
+            None => (!current_tags.is_empty()).then(|| current_tags.clone()),
         };
 
-        let current_tags_opt = if current_tags.is_empty() {
-            None
-        } else {
-            Some(&current_tags)
-        };
+        let current_tag_list = (!current_tags.is_empty()).then_some(&current_tags);
 
         let no_changes = new_password.as_str() == current_password.as_str()
-            && description == current_desc.as_ref().map(|value| value.as_str())
-            && tag_list.as_ref() == current_tags_opt;
+            && description == current_description_text
+            && tag_list.as_ref() == current_tag_list;
 
         if no_changes {
             println!("No changes made to '{name}'.");
@@ -95,5 +75,32 @@ impl Edit {
 
         println!("Edited '{name}'.");
         Ok(())
+    }
+
+    fn prompt_new_password(
+        current_password: &Zeroizing<String>,
+    ) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+        let Some(input) = UserPrompt::optional_password("New password (Enter to keep current): ")?
+        else {
+            return Ok(Zeroizing::new(current_password.as_str().to_string()));
+        };
+
+        Password::length_check(input.as_str(), MIN_ACCOUNT_PASSWORD_LENGTH)?;
+        let confirmation = UserPrompt::password("Confirm new password: ")?;
+
+        Password::match_check(input.as_str(), confirmation.as_str())?;
+        Ok(input)
+    }
+
+    fn resolve_description<'a>(
+        input: &'a str,
+        current: Option<&'a str>,
+    ) -> Result<Option<&'a str>, Box<dyn std::error::Error>> {
+        if input.is_empty() {
+            return Ok(current);
+        }
+
+        Validation::check_description_text(input)?;
+        Ok(Some(input))
     }
 }

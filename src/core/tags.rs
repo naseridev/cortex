@@ -1,29 +1,37 @@
 pub struct TagValidator;
 
+const MAX_TAGS: usize = 20;
+const MAX_TAG_LENGTH: usize = 30;
+
 impl TagValidator {
     pub fn validate(tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-        if tags.len() > 20 {
+        if tags.len() > MAX_TAGS {
             return Err("Maximum 20 tags allowed".into());
         }
 
         for tag in tags {
-            if tag.is_empty() || tag.trim().is_empty() {
-                return Err("Tags cannot be empty".into());
-            }
+            Self::validate_tag(tag)?;
+        }
 
-            if tag.len() > 30 {
-                return Err("Tag length cannot exceed 30 characters".into());
-            }
+        Ok(())
+    }
 
-            if !tag
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-            {
-                return Err(
-                    "Tags can only contain alphanumeric characters, hyphens, and underscores"
-                        .into(),
-                );
-            }
+    fn validate_tag(tag: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if tag.trim().is_empty() {
+            return Err("Tags cannot be empty".into());
+        }
+
+        if tag.len() > MAX_TAG_LENGTH {
+            return Err("Tag length cannot exceed 30 characters".into());
+        }
+
+        if !tag
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(
+                "Tags can only contain alphanumeric characters, hyphens, and underscores".into(),
+            );
         }
 
         Ok(())
@@ -33,8 +41,8 @@ impl TagValidator {
     pub fn normalize(tags: &[String]) -> Vec<String> {
         let mut normalized: Vec<String> = tags
             .iter()
-            .map(|t| t.trim().to_lowercase())
-            .filter(|t| !t.is_empty())
+            .map(|tag| tag.trim().to_lowercase())
+            .filter(|tag| !tag.is_empty())
             .collect();
 
         normalized.sort();
@@ -46,8 +54,14 @@ impl TagValidator {
     pub fn parse_input(input: &str) -> Vec<String> {
         input
             .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .map(|part| part.trim().to_string())
+            .filter(|part| !part.is_empty())
             .collect()
+    }
+
+    pub fn parse_and_validate(input: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let normalized = Self::normalize(&Self::parse_input(input));
+        Self::validate(&normalized)?;
+        Ok(normalized)
     }
 }

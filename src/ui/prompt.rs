@@ -20,11 +20,11 @@ impl UserPrompt {
     ) -> Result<Option<Zeroizing<String>>, Box<dyn std::error::Error>> {
         let secret = Zeroizing::new(rpassword::prompt_password(prompt)?);
 
-        if secret.as_str().is_empty() {
+        if secret.is_empty() {
             return Ok(None);
         }
 
-        if secret.as_str().len() > MAX_PASSWORD_BYTES {
+        if secret.len() > MAX_PASSWORD_BYTES {
             return Err("Password too long (max 128 chars)".into());
         }
 
@@ -43,14 +43,11 @@ impl UserPrompt {
         io::stdout().flush()?;
 
         let raw = Self::read_bounded_line()?;
-        let mut text = match String::from_utf8(raw) {
-            Ok(text) => text,
-            Err(error) => {
-                let mut bytes = error.into_bytes();
-                bytes.zeroize();
-                return Err("Input is not valid UTF-8".into());
-            }
-        };
+        let mut text = String::from_utf8(raw).map_err(|error| {
+            let mut bytes = error.into_bytes();
+            bytes.zeroize();
+            "Input is not valid UTF-8"
+        })?;
 
         let trimmed = text.trim().to_string();
         text.zeroize();

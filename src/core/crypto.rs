@@ -10,6 +10,9 @@ const KDF_VERSION_ARGON2: u8 = 4;
 const ARGON2_MEMORY_KIB: u32 = 64 * 1024;
 const ARGON2_TIME: u32 = 3;
 const ARGON2_PARALLELISM: u32 = 1;
+const KEY_LENGTH: usize = 32;
+const SALT_LENGTH: usize = 32;
+const NONCE_LENGTH: usize = 12;
 
 const FIELD_PASSWORD: &str = "password";
 const FIELD_DESCRIPTION: &str = "description";
@@ -20,9 +23,11 @@ const DUMP_NAME: &str = "cortex_dump";
 const DUMP_FIELD: &str = "snapshot";
 const INTEGRITY_CONTEXT: &str = "cortex vault integrity key v1";
 
+type OptionalSealed = (Option<Vec<u8>>, Option<[u8; NONCE_LENGTH]>);
+
 pub struct Crypto {
     cipher: ChaCha20Poly1305,
-    key: [u8; 32],
+    key: [u8; KEY_LENGTH],
 }
 
 impl Drop for Crypto {
@@ -37,6 +42,7 @@ impl Crypto {
     ) -> Result<(Self, Vec<u8>), Box<dyn std::error::Error>> {
         let salt = Self::generate_salt()?;
         let crypto = Self::from_argon2(master_password.as_bytes(), &salt)?;
+
         Ok((crypto, Self::encode_salt(&salt)))
     }
 
@@ -45,9 +51,10 @@ impl Crypto {
         salt_blob: &[u8],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         match salt_blob {
-            [KDF_VERSION_ARGON2, salt @ ..] if salt.len() == 32 => {
-                let mut salt_array = [0u8; 32];
+            [KDF_VERSION_ARGON2, salt @ ..] if salt.len() == SALT_LENGTH => {
+                let mut salt_array = [0u8; SALT_LENGTH];
                 salt_array.copy_from_slice(salt);
+
                 Self::from_argon2(master_password.as_bytes(), &salt_array)
             }
             _ => Err("Unrecognized key derivation format".into()),
@@ -55,12 +62,12 @@ impl Crypto {
     }
 
     #[must_use]
-    pub fn from_key(key: [u8; 32]) -> Self {
+    pub fn from_key(key: [u8; KEY_LENGTH]) -> Self {
         Self::from_parts(key)
     }
 
     #[must_use]
-    pub fn key(&self) -> &[u8; 32] {
+    pub fn key(&self) -> &[u8; KEY_LENGTH] {
         &self.key
     }
 
@@ -72,7 +79,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub fn integrity_key(&self) -> [u8; 32] {
+    pub fn integrity_key(&self) -> [u8; KEY_LENGTH] {
         blake3::derive_key(INTEGRITY_CONTEXT, &self.key)
     }
 
@@ -89,35 +96,26 @@ impl Crypto {
         description: Option<&str>,
         tags: Option<&[String]>,
     ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
-        let (encrypted, nonce_bytes) = self.seal(name, FIELD_PASSWORD, data)?;
+        let (encrypted_password, nonce) = self.seal(name, FIELD_PASSWORD, data)?;
+        let (encrypted_description, desc_nonce) =
+            self.seal_optional(name, FIELD_DESCRIPTION, description.map(str::as_bytes))?;
 
-        let (encrypted_description, desc_nonce) = if let Some(desc) = description {
-            let (encrypted_desc, desc_nonce_bytes) =
-                self.seal(name, FIELD_DESCRIPTION, desc.as_bytes())?;
-            (Some(encrypted_desc), Some(desc_nonce_bytes))
-        } else {
-            (None, None)
+        let tags_json = match tags.filter(|list| !list.is_empty()) {
+            Some(list) => Some(
+                serde_json::to_string(list)
+                    .map_err(|error| format!("Tag serialization failed: {error}"))?,
+            ),
+            None => None,
         };
 
-        let (encrypted_tags, tags_nonce) = if let Some(tag_list) = tags {
-            if tag_list.is_empty() {
-                (None, None)
-            } else {
-                let tags_json = serde_json::to_string(tag_list)
-                    .map_err(|error| format!("Tag serialization failed: {error}"))?;
-                let (encrypted_tags, tags_nonce_bytes) =
-                    self.seal(name, FIELD_TAGS, tags_json.as_bytes())?;
-                (Some(encrypted_tags), Some(tags_nonce_bytes))
-            }
-        } else {
-            (None, None)
-        };
+        let (encrypted_tags, tags_nonce) =
+            self.seal_optional(name, FIELD_TAGS, tags_json.as_deref().map(str::as_bytes))?;
 
         Ok(PasswordEntry {
-            encrypted_password: encrypted,
+            encrypted_password,
             encrypted_description,
             encrypted_tags,
-            nonce: nonce_bytes,
+            nonce,
             desc_nonce,
             tags_nonce,
             timestamp: Time::current_timestamp(),
@@ -143,16 +141,15 @@ impl Crypto {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-        if let (Some(encrypted_desc), Some(desc_nonce)) =
-            (&entry.encrypted_description, &entry.desc_nonce)
-        {
-            let decrypted = self
-                .open_field(name, FIELD_DESCRIPTION, desc_nonce, encrypted_desc)
-                .map_err(|error| format!("Description decryption failed: {error:?}"))?;
-            Ok(Some(decode_secret_text(decrypted)?))
-        } else {
-            Ok(None)
-        }
+        let (Some(ciphertext), Some(nonce)) = (&entry.encrypted_description, &entry.desc_nonce)
+        else {
+            return Ok(None);
+        };
+
+        let plaintext = self
+            .open_field(name, FIELD_DESCRIPTION, nonce, ciphertext)
+            .map_err(|error| format!("Description decryption failed: {error:?}"))?;
+        Ok(Some(decode_secret_text(plaintext)?))
     }
 
     pub fn decrypt_tags(
@@ -160,47 +157,58 @@ impl Crypto {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        if let (Some(encrypted_tags), Some(tags_nonce)) = (&entry.encrypted_tags, &entry.tags_nonce)
-        {
-            let decrypted = self
-                .open_field(name, FIELD_TAGS, tags_nonce, encrypted_tags)
-                .map_err(|error| format!("Tags decryption failed: {error:?}"))?;
-            let tags: Vec<String> = serde_json::from_slice(&decrypted)
-                .map_err(|error| format!("Tag deserialization failed: {error}"))?;
-            Ok(tags)
-        } else {
-            Ok(Vec::new())
-        }
+        let (Some(ciphertext), Some(nonce)) = (&entry.encrypted_tags, &entry.tags_nonce) else {
+            return Ok(Vec::new());
+        };
+
+        let plaintext = self
+            .open_field(name, FIELD_TAGS, nonce, ciphertext)
+            .map_err(|error| format!("Tags decryption failed: {error:?}"))?;
+        let tags: Vec<String> = serde_json::from_slice(&plaintext)
+            .map_err(|error| format!("Tag deserialization failed: {error}"))?;
+
+        Ok(tags)
     }
 
-    pub fn generate_salt() -> Result<[u8; 32], Box<dyn std::error::Error>> {
-        let mut salt = [0u8; 32];
+    pub fn generate_salt() -> Result<[u8; SALT_LENGTH], Box<dyn std::error::Error>> {
+        let mut salt = [0u8; SALT_LENGTH];
         getrandom::fill(&mut salt)
             .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
+
         Ok(salt)
     }
 
     #[must_use]
-    pub fn encode_salt(salt: &[u8; 32]) -> Vec<u8> {
+    pub fn encode_salt(salt: &[u8; SALT_LENGTH]) -> Vec<u8> {
         let mut blob = Vec::with_capacity(salt.len() + 1);
         blob.push(KDF_VERSION_ARGON2);
         blob.extend_from_slice(salt);
         blob
     }
 
-    fn from_argon2(password: &[u8], salt: &[u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
-        let params = Params::new(ARGON2_MEMORY_KIB, ARGON2_TIME, ARGON2_PARALLELISM, Some(32))
-            .map_err(|error| format!("Invalid Argon2 parameters: {error}"))?;
+    fn from_argon2(
+        password: &[u8],
+        salt: &[u8; SALT_LENGTH],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let params = Params::new(
+            ARGON2_MEMORY_KIB,
+            ARGON2_TIME,
+            ARGON2_PARALLELISM,
+            Some(KEY_LENGTH),
+        )
+        .map_err(|error| format!("Invalid Argon2 parameters: {error}"))?;
         let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        let mut key = [0u8; 32];
+
+        let mut key = [0u8; KEY_LENGTH];
         if let Err(error) = argon.hash_password_into(password, salt, &mut key) {
             key.zeroize();
             return Err(format!("Argon2id derivation failed: {error}").into());
         }
+
         Ok(Self::from_parts(key))
     }
 
-    fn from_parts(key: [u8; 32]) -> Self {
+    fn from_parts(key: [u8; KEY_LENGTH]) -> Self {
         let cipher = ChaCha20Poly1305::new((&key).into());
         Self { cipher, key }
     }
@@ -208,13 +216,13 @@ impl Crypto {
     pub fn seal_blob(
         &self,
         plaintext: &[u8],
-    ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
+    ) -> Result<(Vec<u8>, [u8; NONCE_LENGTH]), Box<dyn std::error::Error>> {
         self.seal(BLOB_NAME, BLOB_FIELD, plaintext)
     }
 
     pub fn open_blob(
         &self,
-        nonce: &[u8; 12],
+        nonce: &[u8; NONCE_LENGTH],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.open_field(BLOB_NAME, BLOB_FIELD, nonce, ciphertext)
@@ -224,13 +232,13 @@ impl Crypto {
     pub fn seal_dump(
         &self,
         plaintext: &[u8],
-    ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
+    ) -> Result<(Vec<u8>, [u8; NONCE_LENGTH]), Box<dyn std::error::Error>> {
         self.seal(DUMP_NAME, DUMP_FIELD, plaintext)
     }
 
     pub fn open_dump(
         &self,
-        nonce: &[u8; 12],
+        nonce: &[u8; NONCE_LENGTH],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         self.open_field(DUMP_NAME, DUMP_FIELD, nonce, ciphertext)
@@ -242,36 +250,54 @@ impl Crypto {
         name: &str,
         field: &str,
         plaintext: &[u8],
-    ) -> Result<(Vec<u8>, [u8; 12]), Box<dyn std::error::Error>> {
-        let mut nonce_bytes = [0u8; 12];
+    ) -> Result<(Vec<u8>, [u8; NONCE_LENGTH]), Box<dyn std::error::Error>> {
+        let mut nonce_bytes = [0u8; NONCE_LENGTH];
         getrandom::fill(&mut nonce_bytes)
             .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
-        let nonce = &Nonce::from(nonce_bytes);
+
+        let nonce = Nonce::from(nonce_bytes);
         let aad = associated_data(name, field);
         let encrypted = self
             .cipher
             .encrypt(
-                nonce,
+                &nonce,
                 Payload {
                     msg: plaintext,
                     aad: &aad,
                 },
             )
             .map_err(|error| format!("{field} encryption failed: {error:?}"))?;
+
         Ok((encrypted, nonce_bytes))
+    }
+
+    fn seal_optional(
+        &self,
+        name: &str,
+        field: &str,
+        plaintext: Option<&[u8]>,
+    ) -> Result<OptionalSealed, Box<dyn std::error::Error>> {
+        match plaintext {
+            Some(bytes) => {
+                let (ciphertext, nonce) = self.seal(name, field, bytes)?;
+                Ok((Some(ciphertext), Some(nonce)))
+            }
+            None => Ok((None, None)),
+        }
     }
 
     fn open_field(
         &self,
         name: &str,
         field: &str,
-        nonce_bytes: &[u8; 12],
+        nonce_bytes: &[u8; NONCE_LENGTH],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, chacha20poly1305::aead::Error> {
-        let nonce = &Nonce::from(*nonce_bytes);
+        let nonce = Nonce::from(*nonce_bytes);
         let aad = associated_data(name, field);
+
         self.cipher.decrypt(
-            nonce,
+            &nonce,
             Payload {
                 msg: ciphertext,
                 aad: &aad,
@@ -284,6 +310,7 @@ fn associated_data(name: &str, field: &str) -> Vec<u8> {
     let name_bytes = name.as_bytes();
     let field_bytes = field.as_bytes();
     let name_len = u32::try_from(name_bytes.len()).unwrap_or(u32::MAX);
+
     let mut data = Vec::with_capacity(4 + name_bytes.len() + field_bytes.len());
     data.extend_from_slice(&name_len.to_le_bytes());
     data.extend_from_slice(name_bytes);

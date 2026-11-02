@@ -1,7 +1,7 @@
 use crate::{
     core::config::Config,
-    modules::{gateway::Gateway, session::Session},
     modules::security::Security,
+    modules::{gateway::Gateway, session::Session},
 };
 
 pub struct Purge;

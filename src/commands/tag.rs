@@ -1,6 +1,11 @@
 use crate::{
-    core::types::decode_secret_text,
-    core::tags::TagValidator,
+    core::{
+        crypto::Crypto,
+        storage::Storage,
+        tags::TagValidator,
+        types::{PasswordEntry, decode_secret_text},
+        validation::Validation,
+    },
     modules::gateway::Gateway,
 };
 use std::collections::{HashMap, HashSet};
@@ -11,7 +16,6 @@ pub struct Tag;
 impl Tag {
     pub fn list() -> Result<(), Box<dyn std::error::Error>> {
         let (storage, crypto) = Gateway::login()?;
-
         let mut tag_counts: HashMap<String, usize> = HashMap::new();
 
         for (name, entry) in storage.list_entries()? {
@@ -22,6 +26,7 @@ impl Tag {
                     continue;
                 }
             };
+
             for tag in tags {
                 *tag_counts.entry(tag).or_insert(0) += 1;
             }
@@ -32,7 +37,7 @@ impl Tag {
             return Ok(());
         }
 
-        let mut sorted_tags: Vec<_> = tag_counts.into_iter().collect();
+        let mut sorted_tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
         sorted_tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
 
         println!("\nTags:");
@@ -44,30 +49,28 @@ impl Tag {
     }
 
     pub fn add(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") || name.trim().is_empty() {
+        if Validation::is_reserved_or_blank(name) {
             return Err("Cannot modify system or empty entries".into());
         }
 
-        let normalized_tags = TagValidator::normalize(tags);
-        if normalized_tags.is_empty() {
+        let requested = TagValidator::normalize(tags);
+        if requested.is_empty() {
             return Err("No valid tags provided".into());
         }
-        TagValidator::validate(&normalized_tags)?;
+
+        TagValidator::validate(&requested)?;
 
         let (storage, crypto) = Gateway::login()?;
+        let entry = Self::load_entry(&storage, name)?;
 
-        let entry = storage
-            .get_password(name)?
-            .ok_or_else(|| format!("Entry '{name}' not found"))?;
-
-        let mut existing_tags = crypto.decrypt_tags(name, &entry)?;
-        let existing_set: HashSet<String> =
-            existing_tags.iter().map(|t| t.to_lowercase()).collect();
+        let mut merged_tags = crypto.decrypt_tags(name, &entry)?;
+        let existing_keys: HashSet<String> =
+            merged_tags.iter().map(|tag| tag.to_lowercase()).collect();
 
         let mut added_count = 0;
-        for tag in normalized_tags {
-            if !existing_set.contains(&tag.to_lowercase()) {
-                existing_tags.push(tag);
+        for tag in requested {
+            if !existing_keys.contains(&tag.to_lowercase()) {
+                merged_tags.push(tag);
                 added_count += 1;
             }
         }
@@ -77,30 +80,17 @@ impl Tag {
             return Ok(());
         }
 
-        let normalized_final = TagValidator::normalize(&existing_tags);
-        TagValidator::validate(&normalized_final)?;
+        let final_tags = TagValidator::normalize(&merged_tags);
+        TagValidator::validate(&final_tags)?;
 
-        let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
-        let secure_password = Zeroizing::new(decode_secret_text(decrypted_bytes)?);
-        let description = crypto.decrypt_description(name, &entry)?;
-
-        let new_entry = crypto.create_entry(
-            name,
-            secure_password.as_bytes(),
-            description.as_deref(),
-            Some(&normalized_final),
-        )?;
-
-        if !storage.edit_password(name, &new_entry)? {
-            return Err(format!("Failed to update entry '{name}'").into());
-        }
+        Self::rewrite_entry(&storage, &crypto, name, &entry, Some(&final_tags))?;
         println!("Added {added_count} tag(s) to '{name}'");
 
         Ok(())
     }
 
     pub fn remove(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-        if name.starts_with("__") || name.trim().is_empty() {
+        if Validation::is_reserved_or_blank(name) {
             return Err("Cannot modify system or empty entries".into());
         }
 
@@ -109,45 +99,55 @@ impl Tag {
         }
 
         let (storage, crypto) = Gateway::login()?;
+        let entry = Self::load_entry(&storage, name)?;
 
-        let entry = storage
-            .get_password(name)?
-            .ok_or_else(|| format!("Entry '{name}' not found"))?;
+        let mut remaining_tags = crypto.decrypt_tags(name, &entry)?;
+        let removal_keys: HashSet<String> = tags.iter().map(|tag| tag.to_lowercase()).collect();
 
-        let mut existing_tags = crypto.decrypt_tags(name, &entry)?;
-        let remove_set: HashSet<String> = tags.iter().map(|t| t.to_lowercase()).collect();
+        let original_count = remaining_tags.len();
 
-        let original_count = existing_tags.len();
-        existing_tags.retain(|t| !remove_set.contains(&t.to_lowercase()));
-
-        let removed_count = original_count - existing_tags.len();
+        remaining_tags.retain(|tag| !removal_keys.contains(&tag.to_lowercase()));
+        let removed_count = original_count - remaining_tags.len();
 
         if removed_count == 0 {
             println!("No tags removed (tags not found)");
             return Ok(());
         }
 
-        let decrypted_bytes = crypto.decrypt_entry(name, &entry)?;
-        let secure_password = Zeroizing::new(decode_secret_text(decrypted_bytes)?);
-        let description = crypto.decrypt_description(name, &entry)?;
+        let remaining = (!remaining_tags.is_empty()).then_some(remaining_tags.as_slice());
+        Self::rewrite_entry(&storage, &crypto, name, &entry, remaining)?;
 
-        let remaining_tags = if existing_tags.is_empty() {
-            None
-        } else {
-            Some(existing_tags.as_slice())
-        };
+        println!("Removed {removed_count} tag(s) from '{name}'");
 
-        let new_entry = crypto.create_entry(
-            name,
-            secure_password.as_bytes(),
-            description.as_deref(),
-            remaining_tags,
-        )?;
+        Ok(())
+    }
 
-        if !storage.edit_password(name, &new_entry)? {
+    fn load_entry(
+        storage: &Storage,
+        name: &str,
+    ) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
+        let entry = storage
+            .get_password(name)?
+            .ok_or_else(|| format!("Entry '{name}' not found"))?;
+        Ok(entry)
+    }
+
+    fn rewrite_entry(
+        storage: &Storage,
+        crypto: &Crypto,
+        name: &str,
+        entry: &PasswordEntry,
+        tags: Option<&[String]>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let decrypted = crypto.decrypt_entry(name, entry)?;
+        let password = Zeroizing::new(decode_secret_text(decrypted)?);
+        let description = crypto.decrypt_description(name, entry)?;
+
+        let updated =
+            crypto.create_entry(name, password.as_bytes(), description.as_deref(), tags)?;
+        if !storage.edit_password(name, &updated)? {
             return Err(format!("Failed to update entry '{name}'").into());
         }
-        println!("Removed {removed_count} tag(s) from '{name}'");
 
         Ok(())
     }

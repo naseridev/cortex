@@ -42,10 +42,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Restore { file } => Restore::execute(&file),
         Commands::Purge => Purge::execute(),
         Commands::Lock => Lock::execute(),
-        Commands::Config { action } => match action {
-            Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
-            Some(ConfigAction::Show) | None => ConfigCmd::show(),
-        },
+        Commands::Config { action } => run_config(action),
         Commands::Pass {
             length,
             count,
@@ -54,35 +51,43 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             digits,
             special,
         } => {
-            let mut bits = 0;
-            if uppercase {
-                bits |= PasswordCharset::UPPERCASE;
-            }
-            if lowercase {
-                bits |= PasswordCharset::LOWERCASE;
-            }
-            if digits {
-                bits |= PasswordCharset::DIGITS;
-            }
-            if special {
-                bits |= PasswordCharset::SPECIAL;
-            }
-            Pass::execute(length, count, PasswordCharset::from_bits(bits))
+            let charset = charset_from_flags(uppercase, lowercase, digits, special);
+            Pass::execute(length, count, charset)
         }
         Commands::Tag { action } => run_tag(action),
+    }
+}
+
+fn run_config(action: Option<ConfigAction>) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        Some(ConfigAction::SetTimeout { seconds }) => ConfigCmd::set_timeout(seconds),
+        Some(ConfigAction::Show) | None => ConfigCmd::show(),
     }
 }
 
 fn run_tag(action: TagAction) -> Result<(), Box<dyn std::error::Error>> {
     match action {
         TagAction::List => Tag::list(),
-        TagAction::Add { name, tags } => {
-            let parsed = TagValidator::parse_input(&tags);
-            Tag::add(&name, &parsed)
-        }
-        TagAction::Remove { name, tags } => {
-            let parsed = TagValidator::parse_input(&tags);
-            Tag::remove(&name, &parsed)
-        }
+        TagAction::Add { name, tags } => Tag::add(&name, &TagValidator::parse_input(&tags)),
+        TagAction::Remove { name, tags } => Tag::remove(&name, &TagValidator::parse_input(&tags)),
     }
+}
+
+fn charset_from_flags(
+    uppercase: bool,
+    lowercase: bool,
+    digits: bool,
+    special: bool,
+) -> PasswordCharset {
+    let bits = [
+        (uppercase, PasswordCharset::UPPERCASE),
+        (lowercase, PasswordCharset::LOWERCASE),
+        (digits, PasswordCharset::DIGITS),
+        (special, PasswordCharset::SPECIAL),
+    ]
+    .into_iter()
+    .filter(|(enabled, _)| *enabled)
+    .fold(0, |bits, (_, flag)| bits | flag);
+
+    PasswordCharset::from_bits(bits)
 }

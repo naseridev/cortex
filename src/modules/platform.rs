@@ -4,14 +4,18 @@ use std::path::{Path, PathBuf};
 
 pub fn create_private_file(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
+
     options.write(true).create_new(true);
     set_private_creation_mode(&mut options);
+
     let file = options.open(path)?;
+
     if let Err(error) = restrict_to_owner(path) {
         drop(file);
         let _ = fs::remove_file(path);
         return Err(error);
     }
+
     Ok(file)
 }
 
@@ -53,6 +57,7 @@ pub fn config_dir() -> Option<PathBuf> {
 pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     let mode = if path.is_dir() { 0o700 } else { 0o600 };
+
     fs::set_permissions(path, fs::Permissions::from_mode(mode))
 }
 
@@ -65,6 +70,7 @@ pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
         Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
         _ => user,
     };
+
     let rights = if path.is_dir() { "(OI)(CI)F" } else { "F" };
     let status = Command::new("icacls")
         .arg(path)

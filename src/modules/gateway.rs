@@ -1,6 +1,3 @@
-use std::{thread, time::Duration};
-use zeroize::Zeroize;
-
 use crate::{
     core::{
         config::Config,
@@ -9,11 +6,13 @@ use crate::{
             MAX_PASSWORD_ATTEMPTS_PER_RUN, THROTTLE_FREE_FAILURES, THROTTLE_MAX_DELAY_SECONDS,
         },
         storage::Storage,
+        validation::Validation,
     },
-    core::validation::Validation,
     modules::session::Session,
     ui::prompt::UserPrompt,
 };
+use std::{thread, time::Duration};
+use zeroize::Zeroize;
 
 pub struct Gateway;
 
@@ -26,6 +25,7 @@ impl Gateway {
     pub fn login() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_vault()?;
         let crypto = Self::prompt_master_key(&storage, &header)?;
+
         Self::finish_login(storage, crypto)
     }
 
@@ -39,26 +39,42 @@ impl Gateway {
     pub fn login_with_session() -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
         let (storage, header) = Self::open_vault()?;
 
-        if let Some(mut key) = Session::load_session(&storage)? {
-            let crypto = Crypto::from_key(key);
-            key.zeroize();
-            if crypto.matches_verification(&header.verification) {
-                return Self::finish_login(storage, crypto);
-            }
-            Session::clear_session()?;
+        if let Some(crypto) = Self::restore_session(&storage, &header)? {
+            return Self::finish_login(storage, crypto);
         }
 
         let crypto = Self::prompt_master_key(&storage, &header)?;
         let (storage, crypto) = Self::finish_login(storage, crypto)?;
+
         if let Err(error) = Session::save_session(crypto.key()) {
             eprintln!("Warning: session could not be stored: {error}");
         }
+
         Ok((storage, crypto))
     }
 
     pub fn login_storage_only() -> Result<Storage, Box<dyn std::error::Error>> {
         let (storage, _) = Self::login()?;
         Ok(storage)
+    }
+
+    fn restore_session(
+        storage: &Storage,
+        header: &VaultHeader,
+    ) -> Result<Option<Crypto>, Box<dyn std::error::Error>> {
+        let Some(mut key) = Session::load_session(storage)? else {
+            return Ok(None);
+        };
+
+        let crypto = Crypto::from_key(key);
+        key.zeroize();
+
+        if crypto.matches_verification(&header.verification) {
+            return Ok(Some(crypto));
+        }
+
+        Session::clear_session()?;
+        Ok(None)
     }
 
     fn finish_login(
@@ -94,6 +110,7 @@ impl Gateway {
     ) -> Result<Crypto, Box<dyn std::error::Error>> {
         for attempt in 1..=MAX_PASSWORD_ATTEMPTS_PER_RUN {
             Self::apply_throttle(storage)?;
+
             let master_password = UserPrompt::password("Master password: ")?;
             let crypto = Crypto::open(&master_password, &header.salt)?;
 
@@ -118,6 +135,7 @@ impl Gateway {
             eprintln!("Too many failed attempts. Waiting {delay}s before the next try.");
             thread::sleep(Duration::from_secs(delay));
         }
+
         Ok(())
     }
 }
@@ -127,6 +145,7 @@ pub fn throttle_delay_seconds(failed_attempts: u32) -> u64 {
     let Some(exponent) = failed_attempts.checked_sub(THROTTLE_FREE_FAILURES) else {
         return 0;
     };
+
     1u64.checked_shl(exponent)
         .unwrap_or(u64::MAX)
         .min(THROTTLE_MAX_DELAY_SECONDS)

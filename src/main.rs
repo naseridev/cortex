@@ -1,9 +1,6 @@
 use clap::Parser;
 use cortex::{
-    commands::{
-        account, dump::Dump, export::Export, import::Import, mcp, pass::Pass, restore::Restore,
-        vault,
-    },
+    commands::{account, mcp, pass::Pass, vault},
     core::password::PasswordCharset,
     ui::cli::{Cli, Commands},
 };
@@ -26,10 +23,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Account { action } => account::run(action),
         Commands::Mcp { action } => mcp::run(action),
         Commands::Vault { action } => vault::run(action),
-        Commands::Export => Export::execute(),
-        Commands::Import { file, overwrite } => Import::execute(&file, overwrite),
-        Commands::Dump => Dump::execute(),
-        Commands::Restore { file } => Restore::execute(&file),
         Commands::Pass {
             length,
             count,

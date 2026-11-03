@@ -55,30 +55,6 @@ pub enum Commands {
         #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
     },
-
-    #[command(about = "Export all passwords to a plaintext CSV file in the current directory")]
-    Export,
-
-    #[command(about = "Import passwords from an encrypted export or a CSV export")]
-    Import {
-        #[arg(help = "Path to an encrypted export or CSV file to import")]
-        file: String,
-        #[arg(
-            short = 'o',
-            long = "overwrite",
-            help = "Overwrite existing entries with same name"
-        )]
-        overwrite: bool,
-    },
-
-    #[command(about = "Write an encrypted dump of the database to the current directory")]
-    Dump,
-
-    #[command(about = "Restore the database from a dump file, replacing its contents")]
-    Restore {
-        #[arg(help = "Path to a dump file created by the dump command")]
-        file: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -177,6 +153,30 @@ pub enum AccountAction {
     Reset {
         #[arg(help = "Name of the account whose master password to reset")]
         name: Option<String>,
+    },
+
+    #[command(about = "Export all passwords to a plaintext CSV file in the current directory")]
+    Export,
+
+    #[command(about = "Import passwords from an encrypted export or a CSV export")]
+    Import {
+        #[arg(help = "Path to an encrypted export or CSV file to import")]
+        file: String,
+        #[arg(
+            short = 'o',
+            long = "overwrite",
+            help = "Overwrite existing entries with same name"
+        )]
+        overwrite: bool,
+    },
+
+    #[command(about = "Write an encrypted dump of the database to the current directory")]
+    Dump,
+
+    #[command(about = "Restore the database from a dump file, replacing its contents")]
+    Restore {
+        #[arg(help = "Path to a dump file created by the dump command")]
+        file: String,
     },
 }
 

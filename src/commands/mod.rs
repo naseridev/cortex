@@ -1,8 +1,4 @@
 pub mod account;
-pub mod dump;
-pub mod export;
-pub mod import;
 pub mod mcp;
 pub mod pass;
-pub mod restore;
 pub mod vault;

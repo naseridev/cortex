@@ -1,8 +1,12 @@
 pub mod create;
 pub mod delete;
+pub mod dump;
 pub mod edit;
+pub mod export;
+pub mod import;
 pub mod list;
 pub mod reset;
+pub mod restore;
 pub mod switch;
 
 use crate::ui::{cli::AccountAction, prompt::UserPrompt};
@@ -15,6 +19,10 @@ pub fn run(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> {
         AccountAction::Delete { name } => delete::execute(name),
         AccountAction::Switch { name } => switch::execute(name),
         AccountAction::Reset { name } => reset::execute(name),
+        AccountAction::Export => export::execute(),
+        AccountAction::Import { file, overwrite } => import::execute(&file, overwrite),
+        AccountAction::Dump => dump::execute(),
+        AccountAction::Restore { file } => restore::execute(&file),
     }
 }
 

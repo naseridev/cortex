@@ -26,26 +26,12 @@ pub fn run(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn resolve_name(
+pub fn resolve_name(
     provided: Option<String>,
     prompt: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     match provided {
         Some(name) => Ok(name.trim().to_string()),
         None => UserPrompt::text(prompt),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::resolve_name;
-
-    #[test]
-    fn provided_name_is_trimmed_without_prompting() -> Result<(), Box<dyn std::error::Error>> {
-        assert_eq!(
-            resolve_name(Some("  work  ".to_string()), "Account name: ")?,
-            "work"
-        );
-        Ok(())
     }
 }

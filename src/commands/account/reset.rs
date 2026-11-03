@@ -12,11 +12,11 @@ use crate::{
 };
 use zeroize::Zeroizing;
 
-struct PlainEntry {
-    name: String,
-    password: Zeroizing<String>,
-    description: Option<String>,
-    tags: Vec<String>,
+pub struct PlainEntry {
+    pub name: String,
+    pub password: Zeroizing<String>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
 }
 
 pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -89,7 +89,7 @@ fn prompt_new_master_password() -> Result<Zeroizing<String>, Box<dyn std::error:
     }
 }
 
-fn decrypt_all(
+pub fn decrypt_all(
     stored_entries: &[(String, PasswordEntry)],
     crypto: &Crypto,
 ) -> Result<Vec<PlainEntry>, Box<dyn std::error::Error>> {
@@ -111,7 +111,7 @@ fn decrypt_all(
     Ok(plain_entries)
 }
 
-fn reencrypt_all(
+pub fn reencrypt_all(
     plain_entries: &[PlainEntry],
     crypto: &Crypto,
 ) -> Result<Vec<(String, PasswordEntry)>, Box<dyn std::error::Error>> {
@@ -130,33 +130,4 @@ fn reencrypt_all(
     }
 
     Ok(updated_entries)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{decrypt_all, reencrypt_all};
-    use crate::core::crypto::Crypto;
-
-    #[test]
-    fn reencryption_keeps_name_password_description_and_tags()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let old_crypto = Crypto::from_key([7u8; 32]);
-        let new_crypto = Crypto::from_key([8u8; 32]);
-        let tags = vec!["mail".to_string(), "work".to_string()];
-        let stored = vec![(
-            "alpha".to_string(),
-            old_crypto.create_entry("alpha", b"secret123", Some("desc"), Some(tags.as_slice()))?,
-        )];
-
-        let plain = decrypt_all(&stored, &old_crypto)?;
-        let reencrypted = reencrypt_all(&plain, &new_crypto)?;
-        let restored = decrypt_all(&reencrypted, &new_crypto)?;
-
-        assert_eq!(restored.len(), 1);
-        assert_eq!(restored[0].name, "alpha");
-        assert_eq!(restored[0].password.as_str(), "secret123");
-        assert_eq!(restored[0].description.as_deref(), Some("desc"));
-        assert_eq!(restored[0].tags, tags);
-        Ok(())
-    }
 }

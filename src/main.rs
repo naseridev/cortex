@@ -1,6 +1,6 @@
 use clap::Parser;
 use cortex::{
-    commands::{account, mcp, pass::Pass, vault},
+    commands::{account, mcp, pass, vault},
     core::password::PasswordCharset,
     ui::cli::{Cli, Commands},
 };
@@ -40,7 +40,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .into_iter()
             .filter(|(enabled, _)| *enabled)
             .fold(0, |bits, (_, flag)| bits | flag);
-            Pass::execute(length, count, PasswordCharset::from_bits(bits))
+            pass::execute(length, count, PasswordCharset::from_bits(bits))
         }
     }
 }

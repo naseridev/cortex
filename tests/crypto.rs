@@ -50,10 +50,7 @@ fn entry_without_optional_fields_decrypts_cleanly() -> Result<(), Box<dyn std::e
 
     assert_eq!(crypto.decrypt_entry("minimal", &entry)?, b"password123");
     assert_eq!(crypto.decrypt_description("minimal", &entry)?, None);
-    assert_eq!(
-        crypto.decrypt_tags("minimal", &entry)?,
-        Vec::<String>::new()
-    );
+    assert_eq!(crypto.decrypt_tags("minimal", &entry)?, Vec::<String>::new());
     Ok(())
 }
 

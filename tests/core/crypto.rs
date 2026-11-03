@@ -2,8 +2,10 @@ use cortex::core::crypto::Crypto;
 use cortex::core::types::PasswordEntry;
 use zeroize::Zeroizing;
 
+use crate::common::TestResult;
+
 #[test]
-fn argon2_create_and_open_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+fn argon2_create_and_open_round_trips() -> TestResult {
     let password = Zeroizing::new("Str0ng!MasterPass".to_string());
     let wrong = Zeroizing::new("Wr0ng!MasterPass".to_string());
 
@@ -27,8 +29,7 @@ fn open_rejects_invalid_salt_format() {
 }
 
 #[test]
-fn generated_salts_are_fresh_and_encoded_with_a_version_prefix()
--> Result<(), Box<dyn std::error::Error>> {
+fn generated_salts_are_fresh_and_encoded_with_a_version_prefix() -> TestResult {
     let first = Crypto::generate_salt()?;
     let second = Crypto::generate_salt()?;
     assert_ne!(first, second);
@@ -40,8 +41,7 @@ fn generated_salts_are_fresh_and_encoded_with_a_version_prefix()
 }
 
 #[test]
-fn entry_encryption_binds_associated_data_to_entry_name() -> Result<(), Box<dyn std::error::Error>>
-{
+fn entry_encryption_binds_associated_data_to_entry_name() -> TestResult {
     let crypto = Crypto::from_key([7u8; 32]);
     let tags = vec!["finance".to_string(), "urgent".to_string()];
     let entry = crypto.create_entry("bank", b"s3cr3t_pass", Some("main account"), Some(&tags))?;
@@ -60,7 +60,7 @@ fn entry_encryption_binds_associated_data_to_entry_name() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn entry_without_optional_fields_decrypts_cleanly() -> Result<(), Box<dyn std::error::Error>> {
+fn entry_without_optional_fields_decrypts_cleanly() -> TestResult {
     let crypto = Crypto::from_key([2u8; 32]);
     let entry = crypto.create_entry("minimal", b"password123", None, None)?;
 
@@ -78,19 +78,19 @@ fn entry_without_optional_fields_decrypts_cleanly() -> Result<(), Box<dyn std::e
 }
 
 #[test]
-fn empty_tag_list_is_stored_as_absent_tags() -> Result<(), Box<dyn std::error::Error>> {
+fn empty_tag_list_is_stored_as_absent_tags() -> TestResult {
     let crypto = Crypto::from_key([2u8; 32]);
     let none: &[String] = &[];
     let entry = crypto.create_entry("bare", b"password123", None, Some(none))?;
 
     assert!(entry.encrypted_tags.is_none());
     assert!(entry.tags_nonce.is_none());
-    assert!(crypto.decrypt_tags("bare", &entry)?.is_empty());
+    assert_eq!(crypto.decrypt_tags("bare", &entry)?, Vec::<String>::new());
     Ok(())
 }
 
 #[test]
-fn identical_plaintexts_produce_distinct_ciphertexts() -> Result<(), Box<dyn std::error::Error>> {
+fn identical_plaintexts_produce_distinct_ciphertexts() -> TestResult {
     let crypto = Crypto::from_key([2u8; 32]);
     let first = crypto.create_entry("bank", b"same-secret", None, None)?;
     let second = crypto.create_entry("bank", b"same-secret", None, None)?;
@@ -101,7 +101,7 @@ fn identical_plaintexts_produce_distinct_ciphertexts() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn entries_cannot_be_decrypted_with_a_different_key() -> Result<(), Box<dyn std::error::Error>> {
+fn entries_cannot_be_decrypted_with_a_different_key() -> TestResult {
     let crypto = Crypto::from_key([2u8; 32]);
     let other = Crypto::from_key([3u8; 32]);
     let entry = crypto.create_entry("bank", b"password123", Some("note"), None)?;
@@ -112,7 +112,7 @@ fn entries_cannot_be_decrypted_with_a_different_key() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn tampered_ciphertext_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn tampered_ciphertext_is_rejected() -> TestResult {
     let crypto = Crypto::from_key([2u8; 32]);
     let entry = crypto.create_entry("bank", b"password123", None, None)?;
 
@@ -123,8 +123,7 @@ fn tampered_ciphertext_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn description_ciphertext_cannot_be_replayed_as_password_field()
--> Result<(), Box<dyn std::error::Error>> {
+fn description_ciphertext_cannot_be_replayed_as_password_field() -> TestResult {
     let crypto = Crypto::from_key([6u8; 32]);
     let entry = crypto.create_entry("bank", b"s3cr3t_pass", Some("main account"), None)?;
 
@@ -138,7 +137,7 @@ fn description_ciphertext_cannot_be_replayed_as_password_field()
 }
 
 #[test]
-fn dump_and_blob_sealing_reject_wrong_keys() -> Result<(), Box<dyn std::error::Error>> {
+fn dump_and_blob_sealing_reject_wrong_keys() -> TestResult {
     let crypto = Crypto::from_key([3u8; 32]);
     let other = Crypto::from_key([4u8; 32]);
 
@@ -159,7 +158,7 @@ fn dump_and_blob_sealing_reject_wrong_keys() -> Result<(), Box<dyn std::error::E
 }
 
 #[test]
-fn sealed_payloads_are_domain_separated() -> Result<(), Box<dyn std::error::Error>> {
+fn sealed_payloads_are_domain_separated() -> TestResult {
     let crypto = Crypto::from_key([3u8; 32]);
 
     let (blob_cipher, blob_nonce) = crypto.seal_blob(b"export payload")?;

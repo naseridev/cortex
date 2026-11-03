@@ -1,4 +1,6 @@
 mod accounts;
+#[path = "../common/mod.rs"]
+mod common;
 mod crypto;
 mod password;
 mod storage;

@@ -1,7 +1,9 @@
 use cortex::core::tags::TagValidator;
 
+use crate::common::TestResult;
+
 #[test]
-fn tag_normalization_lowercases_sorts_and_deduplicates() -> Result<(), Box<dyn std::error::Error>> {
+fn tag_normalization_lowercases_sorts_and_deduplicates() -> TestResult {
     let parsed = TagValidator::parse_and_validate(" Work, FINANCE , work, my-tag_1 ")?;
     assert_eq!(parsed, vec!["finance", "my-tag_1", "work"]);
     Ok(())
@@ -25,7 +27,7 @@ fn parse_input_splits_on_commas_and_drops_blank_segments() {
         TagValidator::parse_input(" a, ,b,, c "),
         vec!["a".to_string(), "b".to_string(), "c".to_string()]
     );
-    assert!(TagValidator::parse_input(" , ,").is_empty());
+    assert_eq!(TagValidator::parse_input(" , ,"), Vec::<String>::new());
 }
 
 #[test]
@@ -66,14 +68,31 @@ fn validate_allows_hyphens_and_underscores_but_not_punctuation() {
 }
 
 #[test]
-fn parse_and_validate_accepts_empty_input_as_no_tags() -> Result<(), Box<dyn std::error::Error>> {
-    assert!(TagValidator::parse_and_validate("")?.is_empty());
+fn parse_and_validate_accepts_empty_input_as_no_tags() -> TestResult {
+    assert_eq!(TagValidator::parse_and_validate("")?, Vec::<String>::new());
     Ok(())
 }
 
 #[test]
-#[ignore = "known defect: the length limit is applied to byte length, not character count"]
 fn length_limit_counts_characters_not_bytes() {
-    let sixteen_two_byte_chars = "\u{e9}".repeat(16);
-    assert!(TagValidator::validate(&[sixteen_two_byte_chars]).is_ok());
+    let tag = "\u{e9}".repeat(16);
+    assert!(TagValidator::validate(&[tag]).is_ok());
+}
+
+#[test]
+fn tag_length_counts_ascii_characters() {
+    let tag = "a".repeat(16);
+    assert!(TagValidator::validate(&[tag]).is_ok());
+}
+
+#[test]
+fn tag_length_counts_multibyte_characters() {
+    let tag = "é".repeat(16);
+    assert!(TagValidator::validate(&[tag]).is_ok());
+}
+
+#[test]
+fn tag_length_rejects_excessive_characters() {
+    let tag = "é".repeat(31);
+    assert!(TagValidator::validate(&[tag]).is_err());
 }

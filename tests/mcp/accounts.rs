@@ -2,8 +2,10 @@ use cortex::mcp::accounts::McpAccounts;
 use cortex::mcp::config::{McpConfig, McpPermission};
 use serde_json::json;
 
+use crate::common::{TestResult, failure};
+
 #[test]
-fn status_reports_active_configuration_and_flags() -> Result<(), String> {
+fn status_reports_active_configuration_and_flags() -> TestResult {
     let config = McpConfig {
         permission: "101".to_string(),
         sandbox: true,
@@ -11,7 +13,7 @@ fn status_reports_active_configuration_and_flags() -> Result<(), String> {
     };
     let perm = McpPermission::parse(&config.permission)?;
     let output = McpAccounts::status(&config, perm)?;
-    let parsed: serde_json::Value = serde_json::from_str(&output).map_err(|e| e.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&output)?;
 
     assert_eq!(parsed["permission"], "101");
     assert_eq!(parsed["can_create_account"], true);
@@ -23,59 +25,67 @@ fn status_reports_active_configuration_and_flags() -> Result<(), String> {
 }
 
 #[test]
-fn listing_is_refused_without_read_permission() -> Result<(), String> {
+fn listing_is_refused_without_read_permission() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("100")?;
-    let error = McpAccounts::list(&config, perm).expect_err("read must be denied");
+    let error = failure(McpAccounts::list(&config, perm))?;
     assert!(error.contains("Read access denied"));
     Ok(())
 }
 
 #[test]
-fn account_creation_is_refused_without_account_permission() -> Result<(), String> {
+fn account_creation_is_refused_without_account_permission() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("011")?;
-    let error = McpAccounts::create(&config, perm, &json!({ "name": "agent" }))
-        .expect_err("creation must be denied");
+    let error = failure(McpAccounts::create(
+        &config,
+        perm,
+        &json!({ "name": "agent" }),
+    ))?;
     assert!(error.contains("Account creation denied"));
     Ok(())
 }
 
 #[test]
-fn account_creation_requires_a_name_before_touching_storage() -> Result<(), String> {
+fn account_creation_requires_a_name_before_touching_storage() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("100")?;
-    let error = McpAccounts::create(&config, perm, &json!({})).expect_err("name is required");
+    let error = failure(McpAccounts::create(&config, perm, &json!({})))?;
     assert_eq!(error, "Missing required parameter: 'name'");
     Ok(())
 }
 
 #[test]
-fn account_creation_rejects_reserved_names() -> Result<(), String> {
+fn account_creation_rejects_reserved_names() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("100")?;
-    let error = McpAccounts::create(&config, perm, &json!({ "name": "__system" }))
-        .expect_err("reserved name must be rejected");
+    let error = failure(McpAccounts::create(
+        &config,
+        perm,
+        &json!({ "name": "__system" }),
+    ))?;
     assert_eq!(error, "Invalid account name");
     Ok(())
 }
 
 #[test]
-fn switching_is_refused_when_every_capability_is_off() -> Result<(), String> {
+fn switching_is_refused_when_every_capability_is_off() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("000")?;
-    let error = McpAccounts::switch(&config, perm, &json!({ "name": "agent" }))
-        .expect_err("switch must be denied");
+    let error = failure(McpAccounts::switch(
+        &config,
+        perm,
+        &json!({ "name": "agent" }),
+    ))?;
     assert_eq!(error, "Access denied by current MCP permission.");
     Ok(())
 }
 
 #[test]
-fn switching_requires_a_name_when_permitted() -> Result<(), String> {
+fn switching_requires_a_name_when_permitted() -> TestResult {
     let config = McpConfig::default();
     let perm = McpPermission::parse("001")?;
-    let error = McpAccounts::switch(&config, perm, &json!({ "name": "  " }))
-        .expect_err("blank name is missing");
+    let error = failure(McpAccounts::switch(&config, perm, &json!({ "name": "  " })))?;
     assert_eq!(error, "Missing required parameter: 'name'");
     Ok(())
 }

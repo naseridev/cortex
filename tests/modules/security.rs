@@ -1,11 +1,11 @@
 use cortex::modules::security::Security;
 
-fn apply(operator: &str, left: i64, right: i64) -> i64 {
+fn apply(operator: &str, left: i64, right: i64) -> Option<i64> {
     match operator {
-        "+" => left + right,
-        "-" => left - right,
-        "*" => left * right,
-        other => panic!("unexpected operator {other}"),
+        "+" => left.checked_add(right),
+        "-" => left.checked_sub(right),
+        "*" => left.checked_mul(right),
+        _ => None,
     }
 }
 
@@ -15,17 +15,17 @@ fn math_puzzles_have_a_consistent_expression_and_answer() -> Result<(), Box<dyn 
     for _ in 0..200 {
         let (expression, answer) = Security::generate_math_puzzle()?;
         let tokens: Vec<&str> = expression.split_whitespace().collect();
-        assert_eq!(tokens.len(), 5, "{expression}");
+        let [left_token, first, right_token, second, last_token] = tokens.as_slice() else {
+            return Err(format!("unexpected expression {expression}").into());
+        };
 
-        let a: i64 = tokens[0].trim_start_matches('(').parse()?;
-        let first = tokens[1];
-        let b: i64 = tokens[2].trim_end_matches(')').parse()?;
-        let second = tokens[3];
-        let c: i64 = tokens[4].parse()?;
+        let a: i64 = left_token.trim_start_matches('(').parse()?;
+        let b: i64 = right_token.trim_end_matches(')').parse()?;
+        let c: i64 = last_token.parse()?;
 
-        let intermediate = apply(first, a, b);
+        let intermediate = apply(first, a, b).ok_or("intermediate overflow")?;
         assert!(intermediate > 0, "{expression}");
-        assert_eq!(apply(second, intermediate, c), answer, "{expression}");
+        assert_eq!(apply(second, intermediate, c), Some(answer), "{expression}");
         assert!(answer > 0, "{expression}");
     }
     Ok(())

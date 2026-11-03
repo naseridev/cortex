@@ -1,10 +1,10 @@
 use clap::{CommandFactory, Parser};
 use cortex::ui::cli::{AccountAction, Cli, Commands, McpAction, TagAction, VaultAction};
 
-fn parse(args: &[&str]) -> Result<Commands, clap::Error> {
-    let mut argv = vec!["cortex"];
-    argv.extend_from_slice(args);
-    Cli::try_parse_from(argv).map(|cli| cli.command)
+fn parse(input: &[&str]) -> Result<Commands, clap::Error> {
+    let mut words = vec!["cortex"];
+    words.extend_from_slice(input);
+    Cli::try_parse_from(words).map(|cli| cli.command)
 }
 
 #[test]
@@ -13,7 +13,7 @@ fn clap_definitions_are_internally_consistent() {
 }
 
 #[test]
-fn pass_command_uses_documented_defaults() -> Result<(), clap::Error> {
+fn pass_command_uses_documented_defaults() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Pass {
         length,
         count,
@@ -23,7 +23,7 @@ fn pass_command_uses_documented_defaults() -> Result<(), clap::Error> {
         special,
     } = parse(&["pass"])?
     else {
-        panic!("expected the pass command");
+        return Err("expected the pass command".into());
     };
     assert_eq!((length, count), (16, 1));
     assert!(!uppercase && !lowercase && !digits && !special);
@@ -31,7 +31,7 @@ fn pass_command_uses_documented_defaults() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn pass_command_parses_short_flags_and_values() -> Result<(), clap::Error> {
+fn pass_command_parses_short_flags_and_values() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Pass {
         length,
         count,
@@ -41,7 +41,7 @@ fn pass_command_parses_short_flags_and_values() -> Result<(), clap::Error> {
         special,
     } = parse(&["pass", "-l", "24", "-c", "5", "-u", "-w", "-d", "-s"])?
     else {
-        panic!("expected the pass command");
+        return Err("expected the pass command".into());
     };
     assert_eq!((length, count), (24, 5));
     assert!(uppercase && lowercase && digits && special);
@@ -49,7 +49,7 @@ fn pass_command_parses_short_flags_and_values() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn vault_find_parses_pattern_and_flags() -> Result<(), clap::Error> {
+fn vault_find_parses_pattern_and_flags() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Vault {
         action:
             VaultAction::Find {
@@ -59,7 +59,7 @@ fn vault_find_parses_pattern_and_flags() -> Result<(), clap::Error> {
             },
     } = parse(&["vault", "find", "^git", "-i", "-n"])?
     else {
-        panic!("expected vault find");
+        return Err("expected vault find".into());
     };
     assert_eq!(pattern, "^git");
     assert!(ignore_case);
@@ -68,12 +68,12 @@ fn vault_find_parses_pattern_and_flags() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn vault_create_accepts_comma_separated_tags() -> Result<(), clap::Error> {
+fn vault_create_accepts_comma_separated_tags() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Vault {
         action: VaultAction::Create { name, tags },
     } = parse(&["vault", "create", "github", "-t", "work,dev"])?
     else {
-        panic!("expected vault create");
+        return Err("expected vault create".into());
     };
     assert_eq!(name, "github");
     assert_eq!(tags.as_deref(), Some("work,dev"));
@@ -81,26 +81,26 @@ fn vault_create_accepts_comma_separated_tags() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn vault_get_show_flag_is_optional() -> Result<(), clap::Error> {
+fn vault_get_show_flag_is_optional() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Vault {
         action: VaultAction::Get { show, .. },
     } = parse(&["vault", "get", "bank"])?
     else {
-        panic!("expected vault get");
+        return Err("expected vault get".into());
     };
     assert!(!show);
     Ok(())
 }
 
 #[test]
-fn tag_add_parses_entry_and_tags() -> Result<(), clap::Error> {
+fn tag_add_parses_entry_and_tags() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Vault {
         action: VaultAction::Tag {
             action: TagAction::Add { name, tags },
         },
     } = parse(&["vault", "tag", "add", "bank", "finance,urgent"])?
     else {
-        panic!("expected vault tag add");
+        return Err("expected vault tag add".into());
     };
     assert_eq!(name, "bank");
     assert_eq!(tags, "finance,urgent");
@@ -108,12 +108,12 @@ fn tag_add_parses_entry_and_tags() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn account_import_parses_overwrite_flag() -> Result<(), clap::Error> {
+fn account_import_parses_overwrite_flag() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Account {
         action: AccountAction::Import { file, overwrite },
     } = parse(&["account", "import", "backup.csv", "--overwrite"])?
     else {
-        panic!("expected account import");
+        return Err("expected account import".into());
     };
     assert_eq!(file, "backup.csv");
     assert!(overwrite);
@@ -121,12 +121,12 @@ fn account_import_parses_overwrite_flag() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn account_edit_arguments_are_optional() -> Result<(), clap::Error> {
+fn account_edit_arguments_are_optional() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Account {
         action: AccountAction::Edit { name, new_name },
     } = parse(&["account", "edit"])?
     else {
-        panic!("expected account edit");
+        return Err("expected account edit".into());
     };
     assert!(name.is_none());
     assert!(new_name.is_none());
@@ -134,24 +134,24 @@ fn account_edit_arguments_are_optional() -> Result<(), clap::Error> {
 }
 
 #[test]
-fn mcp_permission_mode_is_optional_for_viewing() -> Result<(), clap::Error> {
+fn mcp_permission_mode_is_optional_for_viewing() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Mcp {
         action: McpAction::Permission { mode },
     } = parse(&["mcp", "permission"])?
     else {
-        panic!("expected mcp permission");
+        return Err("expected mcp permission".into());
     };
     assert!(mode.is_none());
     Ok(())
 }
 
 #[test]
-fn mcp_remove_parses_purge_flag() -> Result<(), clap::Error> {
+fn mcp_remove_parses_purge_flag() -> Result<(), Box<dyn std::error::Error>> {
     let Commands::Mcp {
         action: McpAction::Remove { purge_accounts },
     } = parse(&["mcp", "remove", "--purge-accounts"])?
     else {
-        panic!("expected mcp remove");
+        return Err("expected mcp remove".into());
     };
     assert!(purge_accounts);
     Ok(())

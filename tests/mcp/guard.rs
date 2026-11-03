@@ -2,8 +2,10 @@ use cortex::mcp::config::McpPermission;
 use cortex::mcp::guard::McpGuard;
 use serde_json::json;
 
+use crate::common::{TestResult, failure};
+
 #[test]
-fn guard_enforces_individual_permission_digits() -> Result<(), String> {
+fn guard_enforces_individual_permission_digits() -> TestResult {
     let read_only = McpPermission::parse("001")?;
     assert!(McpGuard::require_read(read_only).is_ok());
     assert!(McpGuard::require_write(read_only).is_err());
@@ -22,24 +24,24 @@ fn guard_enforces_individual_permission_digits() -> Result<(), String> {
 }
 
 #[test]
-fn permission_denials_name_the_digit_and_the_current_mode() -> Result<(), String> {
+fn permission_denials_name_the_digit_and_the_current_mode() -> TestResult {
     let none = McpPermission::parse("000")?;
-    let read_error = McpGuard::require_read(none).expect_err("read must be denied");
+    let read_error = failure(McpGuard::require_read(none))?;
     assert!(read_error.contains("000"));
     assert!(read_error.contains("ones digit"));
 
     let read_only = McpPermission::parse("001")?;
-    let write_error = McpGuard::require_write(read_only).expect_err("write must be denied");
+    let write_error = failure(McpGuard::require_write(read_only))?;
     assert!(write_error.contains("tens digit"));
 
     let write_only = McpPermission::parse("010")?;
-    let account_error = McpGuard::require_account(write_only).expect_err("account must be denied");
+    let account_error = failure(McpGuard::require_account(write_only))?;
     assert!(account_error.contains("hundreds digit"));
     Ok(())
 }
 
 #[test]
-fn guard_extracts_and_validates_tags_from_json_args() -> Result<(), String> {
+fn guard_extracts_and_validates_tags_from_json_args() -> TestResult {
     let from_array = json!({ "tags": ["Work", "finance", "work"] });
     assert_eq!(
         McpGuard::extract_tags(&from_array)?,
@@ -61,7 +63,7 @@ fn guard_extracts_and_validates_tags_from_json_args() -> Result<(), String> {
 }
 
 #[test]
-fn blank_tag_strings_clear_tags_instead_of_failing() -> Result<(), String> {
+fn blank_tag_strings_clear_tags_instead_of_failing() -> TestResult {
     assert_eq!(
         McpGuard::extract_tags(&json!({ "tags": "" }))?,
         Some(Vec::new())
@@ -86,13 +88,13 @@ fn tag_arrays_longer_than_the_limit_are_rejected() {
 }
 
 #[test]
-fn required_string_is_trimmed_and_must_be_present() -> Result<(), String> {
+fn required_string_is_trimmed_and_must_be_present() -> TestResult {
     assert_eq!(
         McpGuard::required_str(&json!({ "name": "  work  " }), "name")?,
         "work"
     );
 
-    let missing = McpGuard::required_str(&json!({}), "name").expect_err("missing");
+    let missing = failure(McpGuard::required_str(&json!({}), "name"))?;
     assert_eq!(missing, "Missing required parameter: 'name'");
 
     assert!(McpGuard::required_str(&json!({ "name": "   " }), "name").is_err());

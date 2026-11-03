@@ -4,6 +4,8 @@ use cortex::core::storage::Storage;
 use cortex::core::validation::Validation;
 use tempfile::TempDir;
 
+use crate::common::{TestResult, failure};
+
 #[test]
 fn account_name_validation_blocks_reserved_blank_and_control_chars() {
     assert!(Validation::check_account_name("").is_err());
@@ -74,7 +76,7 @@ fn printable_sanitizer_keeps_ordinary_non_ascii_text() {
 }
 
 #[test]
-fn account_exists_probe_matches_the_expected_presence() -> Result<(), Box<dyn std::error::Error>> {
+fn account_exists_probe_matches_the_expected_presence() -> TestResult {
     let dir = TempDir::new()?;
     let storage = Storage::open_at(&dir.path().join("vault.redb"))?;
     let crypto = Crypto::from_key([9u8; 32]);
@@ -82,7 +84,7 @@ fn account_exists_probe_matches_the_expected_presence() -> Result<(), Box<dyn st
 
     Validation::account_exists_probe(&storage, "alpha", false, "should be absent")?;
     let missing = Validation::account_exists_probe(&storage, "alpha", true, "should be present");
-    assert_eq!(missing.unwrap_err().to_string(), "should be present");
+    assert_eq!(failure(missing)?.to_string(), "should be present");
 
     let entry = crypto.create_entry("alpha", b"pass1234", None, None)?;
     storage.create_password("alpha", &entry)?;
@@ -91,8 +93,7 @@ fn account_exists_probe_matches_the_expected_presence() -> Result<(), Box<dyn st
 }
 
 #[test]
-fn account_exists_probe_never_reports_reserved_names_as_present()
--> Result<(), Box<dyn std::error::Error>> {
+fn account_exists_probe_never_reports_reserved_names_as_present() -> TestResult {
     let dir = TempDir::new()?;
     let storage = Storage::open_at(&dir.path().join("vault.redb"))?;
     let crypto = Crypto::from_key([9u8; 32]);

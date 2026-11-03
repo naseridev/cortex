@@ -1,7 +1,9 @@
 use cortex::mcp::config::{McpConfig, McpPermission};
 
+use crate::common::{TestResult, failure};
+
 #[test]
-fn permission_parser_validates_all_binary_combinations() -> Result<(), String> {
+fn permission_parser_validates_all_binary_combinations() -> TestResult {
     let cases = [
         ("000", false, false, false, true),
         ("001", false, false, true, false),
@@ -31,16 +33,17 @@ fn permission_parser_validates_all_binary_combinations() -> Result<(), String> {
 }
 
 #[test]
-fn permission_parser_trims_surrounding_whitespace() -> Result<(), String> {
+fn permission_parser_trims_surrounding_whitespace() -> TestResult {
     let perm = McpPermission::parse("  101\t ")?;
     assert_eq!(perm.as_str(), "101");
     Ok(())
 }
 
 #[test]
-fn invalid_permission_error_explains_the_digit_layout() {
-    let error = McpPermission::parse("12").err().expect("must be rejected");
+fn invalid_permission_error_explains_the_digit_layout() -> TestResult {
+    let error = failure(McpPermission::parse("12"))?;
     assert!(error.contains("3-digit binary"));
+    Ok(())
 }
 
 #[test]
@@ -52,8 +55,8 @@ fn default_config_grants_full_access_with_sandbox_enabled() {
 }
 
 #[test]
-fn describe_permission_summarizes_each_capability() -> Result<(), Box<dyn std::error::Error>> {
-    let describe = |permission: &str| -> Result<String, Box<dyn std::error::Error>> {
+fn describe_permission_summarizes_each_capability() -> TestResult {
+    let describe = |permission: &str| {
         McpConfig {
             permission: permission.to_string(),
             sandbox: false,

@@ -21,7 +21,7 @@ impl TagValidator {
             return Err("Tags cannot be empty".into());
         }
 
-        if tag.len() > MAX_TAG_LENGTH {
+        if tag.chars().count() > MAX_TAG_LENGTH {
             return Err("Tag length cannot exceed 30 characters".into());
         }
 

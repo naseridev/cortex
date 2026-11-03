@@ -1,9 +1,10 @@
 use cortex::commands::account::reset::{PlainEntry, decrypt_all, reencrypt_all};
 use cortex::core::crypto::Crypto;
 
+use crate::common::TestResult;
+
 #[test]
-fn reencryption_keeps_name_password_description_and_tags() -> Result<(), Box<dyn std::error::Error>>
-{
+fn reencryption_keeps_name_password_description_and_tags() -> TestResult {
     let old_crypto = Crypto::from_key([7u8; 32]);
     let new_crypto = Crypto::from_key([8u8; 32]);
     let tags = vec!["mail".to_string(), "work".to_string()];

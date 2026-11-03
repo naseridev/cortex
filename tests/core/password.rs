@@ -1,5 +1,7 @@
 use cortex::core::password::{Password, PasswordCharset};
 
+use crate::common::{TestResult, failure};
+
 const SPECIAL_CHARACTERS: &str = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 
 fn all_classes() -> PasswordCharset {
@@ -12,7 +14,7 @@ fn all_classes() -> PasswordCharset {
 }
 
 #[test]
-fn generator_includes_all_selected_character_classes() -> Result<(), String> {
+fn generator_includes_all_selected_character_classes() -> TestResult {
     let charset = all_classes();
 
     for _ in 0..30 {
@@ -27,7 +29,7 @@ fn generator_includes_all_selected_character_classes() -> Result<(), String> {
 }
 
 #[test]
-fn generator_respects_single_class_restriction() -> Result<(), String> {
+fn generator_respects_single_class_restriction() -> TestResult {
     let digits_only = PasswordCharset::from_bits(PasswordCharset::DIGITS);
     let generated = Password::generate(20, digits_only)?;
     assert_eq!(generated.len(), 20);
@@ -36,7 +38,7 @@ fn generator_respects_single_class_restriction() -> Result<(), String> {
 }
 
 #[test]
-fn generator_output_uses_only_the_selected_classes() -> Result<(), String> {
+fn generator_output_uses_only_the_selected_classes() -> TestResult {
     let charset = PasswordCharset::from_bits(PasswordCharset::LOWERCASE | PasswordCharset::DIGITS);
 
     for _ in 0..20 {
@@ -51,7 +53,7 @@ fn generator_output_uses_only_the_selected_classes() -> Result<(), String> {
 }
 
 #[test]
-fn generator_without_flags_falls_back_to_every_class() -> Result<(), String> {
+fn generator_without_flags_falls_back_to_every_class() -> TestResult {
     let no_flags = PasswordCharset::from_bits(0);
 
     for _ in 0..20 {
@@ -65,7 +67,7 @@ fn generator_without_flags_falls_back_to_every_class() -> Result<(), String> {
 }
 
 #[test]
-fn generator_accepts_length_equal_to_class_count() -> Result<(), String> {
+fn generator_accepts_length_equal_to_class_count() -> TestResult {
     let generated = Password::generate(4, all_classes())?;
     assert_eq!(generated.chars().count(), 4);
     assert!(generated.chars().any(|c| c.is_ascii_uppercase()));
@@ -89,7 +91,7 @@ fn generator_rejects_zero_length() {
 }
 
 #[test]
-fn generator_outputs_differ_between_calls() -> Result<(), String> {
+fn generator_outputs_differ_between_calls() -> TestResult {
     let first = Password::generate(32, all_classes())?;
     let second = Password::generate(32, all_classes())?;
     assert_ne!(first, second);
@@ -125,48 +127,30 @@ fn master_password_security_check_enforces_complexity() {
 }
 
 #[test]
-fn master_password_security_check_names_each_missing_class() {
-    assert!(
-        Password::security_check("alllowercase1!")
-            .unwrap_err()
-            .contains("uppercase letter")
-    );
-    assert!(
-        Password::security_check("ALLUPPERCASE1!")
-            .unwrap_err()
-            .contains("lowercase letter")
-    );
-    assert!(
-        Password::security_check("NoDigitsHere!")
-            .unwrap_err()
-            .contains("digit")
-    );
-    assert!(
-        Password::security_check("NoSpecialChars1")
-            .unwrap_err()
-            .contains("special character")
-    );
+fn master_password_security_check_names_each_missing_class() -> TestResult {
+    assert!(failure(Password::security_check("alllowercase1!"))?.contains("uppercase letter"));
+    assert!(failure(Password::security_check("ALLUPPERCASE1!"))?.contains("lowercase letter"));
+    assert!(failure(Password::security_check("NoDigitsHere!"))?.contains("digit"));
+    assert!(failure(Password::security_check("NoSpecialChars1"))?.contains("special character"));
+    Ok(())
 }
 
 #[test]
-fn master_password_security_check_requires_minimum_length() {
-    assert!(
-        Password::security_check("Abc1!xy")
-            .unwrap_err()
-            .contains("at least 8 characters")
-    );
+fn master_password_security_check_requires_minimum_length() -> TestResult {
+    assert!(failure(Password::security_check("Abc1!xy"))?.contains("at least 8 characters"));
     assert!(Password::security_check("Abc1!xyz").is_ok());
+    Ok(())
 }
 
 #[test]
-fn length_check_enforces_the_exact_minimum() -> Result<(), Box<dyn std::error::Error>> {
+fn length_check_enforces_the_exact_minimum() -> TestResult {
     assert!(Password::length_check("1234567", 8).is_err());
     Password::length_check("12345678", 8)?;
     Ok(())
 }
 
 #[test]
-fn match_check_rejects_different_inputs() -> Result<(), Box<dyn std::error::Error>> {
+fn match_check_rejects_different_inputs() -> TestResult {
     assert!(Password::match_check("alpha", "beta").is_err());
     Password::match_check("alpha", "alpha")?;
     Ok(())

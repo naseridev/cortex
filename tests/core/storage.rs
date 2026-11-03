@@ -3,7 +3,10 @@ use cortex::core::dump::Dump;
 use cortex::core::storage::Storage;
 use cortex::core::types::PasswordEntry;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
+
+use crate::common::{TestResult, failure};
 
 fn setup_vault() -> Result<(TempDir, Storage, Crypto), Box<dyn std::error::Error>> {
     let dir = TempDir::new()?;
@@ -21,15 +24,12 @@ fn make_entry(
     crypto.create_entry(name, password.as_bytes(), Some("desc"), None)
 }
 
-fn integrity_error(storage: &Storage) -> String {
-    storage
-        .verify_integrity()
-        .expect_err("tampering must be detected")
-        .to_string()
+fn integrity_error(storage: &Storage) -> Result<String, Box<dyn std::error::Error>> {
+    Ok(failure(storage.verify_integrity())?.to_string())
 }
 
 #[test]
-fn crud_operations_maintain_integrity() -> Result<(), Box<dyn std::error::Error>> {
+fn crud_operations_maintain_integrity() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
 
     assert!(storage.create_password("alpha", &make_entry(&crypto, "alpha", "pass1234")?)?);
@@ -56,7 +56,7 @@ fn crud_operations_maintain_integrity() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn search_returns_candidates_without_reserved_records() -> Result<(), Box<dyn std::error::Error>> {
+fn search_returns_candidates_without_reserved_records() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     assert!(storage.search_entries("anything")?.is_empty());
 
@@ -68,7 +68,7 @@ fn search_returns_candidates_without_reserved_records() -> Result<(), Box<dyn st
 }
 
 #[test]
-fn search_rejects_empty_and_oversized_patterns() -> Result<(), Box<dyn std::error::Error>> {
+fn search_rejects_empty_and_oversized_patterns() -> TestResult {
     let (_dir, storage, _crypto) = setup_vault()?;
     assert!(storage.search_entries("   ").is_err());
     assert!(storage.search_entries(&"a".repeat(101)).is_err());
@@ -77,7 +77,7 @@ fn search_rejects_empty_and_oversized_patterns() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
-fn listing_and_lookup_exclude_reserved_records() -> Result<(), Box<dyn std::error::Error>> {
+fn listing_and_lookup_exclude_reserved_records() -> TestResult {
     let (_dir, storage, _crypto) = setup_vault()?;
 
     assert!(storage.list_entries()?.is_empty());
@@ -89,7 +89,7 @@ fn listing_and_lookup_exclude_reserved_records() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
-fn reserved_names_are_protected_from_user_operations() -> Result<(), Box<dyn std::error::Error>> {
+fn reserved_names_are_protected_from_user_operations() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     let dummy = make_entry(&crypto, "__config__", "pass1234")?;
 
@@ -102,7 +102,7 @@ fn reserved_names_are_protected_from_user_operations() -> Result<(), Box<dyn std
 }
 
 #[test]
-fn empty_names_are_rejected_on_create_and_delete() -> Result<(), Box<dyn std::error::Error>> {
+fn empty_names_are_rejected_on_create_and_delete() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     let entry = make_entry(&crypto, "", "pass1234")?;
 
@@ -112,8 +112,7 @@ fn empty_names_are_rejected_on_create_and_delete() -> Result<(), Box<dyn std::er
 }
 
 #[test]
-fn put_entries_is_all_or_nothing_when_a_name_is_reserved() -> Result<(), Box<dyn std::error::Error>>
-{
+fn put_entries_is_all_or_nothing_when_a_name_is_reserved() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     let batch = vec![
         (
@@ -133,7 +132,7 @@ fn put_entries_is_all_or_nothing_when_a_name_is_reserved() -> Result<(), Box<dyn
 }
 
 #[test]
-fn put_entries_writes_a_batch_and_accepts_an_empty_one() -> Result<(), Box<dyn std::error::Error>> {
+fn put_entries_writes_a_batch_and_accepts_an_empty_one() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.put_entries(&[])?;
 
@@ -152,49 +151,44 @@ fn put_entries_writes_a_batch_and_accepts_an_empty_one() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn integrity_verification_detects_tampering_and_rollback() -> Result<(), Box<dyn std::error::Error>>
-{
+fn integrity_verification_detects_tampering_and_rollback() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "first_secret")?)?;
     let snapshot_raw = storage.get_raw(b"alpha")?.ok_or("missing alpha")?;
 
     storage.edit_password("alpha", &make_entry(&crypto, "alpha", "second_secret")?)?;
     storage.put_raw(b"alpha", &snapshot_raw)?;
-    assert!(integrity_error(&storage).contains("integrity check failed"));
-
+    assert!(integrity_error(&storage)?.contains("integrity check failed"));
     Ok(())
 }
 
 #[test]
-fn integrity_verification_detects_unauthorized_deletion_and_injection()
--> Result<(), Box<dyn std::error::Error>> {
+fn integrity_verification_detects_unauthorized_deletion_and_injection() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "first_secret")?)?;
 
     storage.remove_raw(b"alpha")?;
-    assert!(integrity_error(&storage).contains("integrity check failed"));
+    assert!(integrity_error(&storage)?.contains("integrity check failed"));
 
     let (_dir2, storage2, crypto2) = setup_vault()?;
     let injected = make_entry(&crypto2, "rogue", "injected_secret")?;
     storage2.put_raw(b"rogue", &postcard::to_allocvec(&injected)?)?;
-    assert!(integrity_error(&storage2).contains("integrity check failed"));
-
+    assert!(integrity_error(&storage2)?.contains("integrity check failed"));
     Ok(())
 }
 
 #[test]
-fn tampered_manifest_record_is_detected() -> Result<(), Box<dyn std::error::Error>> {
+fn tampered_manifest_record_is_detected() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "pass1234")?)?;
 
     storage.put_raw(b"__manifest__", &[0u8; 5])?;
-    assert!(integrity_error(&storage).contains("integrity check failed"));
+    assert!(integrity_error(&storage)?.contains("integrity check failed"));
     Ok(())
 }
 
 #[test]
-fn reserved_bookkeeping_records_do_not_affect_integrity() -> Result<(), Box<dyn std::error::Error>>
-{
+fn reserved_bookkeeping_records_do_not_affect_integrity() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "pass1234")?)?;
 
@@ -204,7 +198,7 @@ fn reserved_bookkeeping_records_do_not_affect_integrity() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn fresh_vault_without_user_records_verifies() -> Result<(), Box<dyn std::error::Error>> {
+fn fresh_vault_without_user_records_verifies() -> TestResult {
     let dir = TempDir::new()?;
     let storage = Storage::open_at(&dir.path().join("empty.redb"))?;
     storage.bind_integrity(&Crypto::from_key([1u8; 32]));
@@ -213,19 +207,18 @@ fn fresh_vault_without_user_records_verifies() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
-fn legacy_vault_without_manifest_requires_an_upgrade() -> Result<(), Box<dyn std::error::Error>> {
+fn legacy_vault_without_manifest_requires_an_upgrade() -> TestResult {
     let dir = TempDir::new()?;
     let storage = Storage::open_at(&dir.path().join("legacy.redb"))?;
     storage.bind_integrity(&Crypto::from_key([1u8; 32]));
     storage.put_raw(b"alpha", b"opaque-record")?;
 
-    assert!(integrity_error(&storage).contains("predates integrity protection"));
+    assert!(integrity_error(&storage)?.contains("predates integrity protection"));
     Ok(())
 }
 
 #[test]
-fn writes_are_refused_until_the_storage_is_bound_to_a_key() -> Result<(), Box<dyn std::error::Error>>
-{
+fn writes_are_refused_until_the_storage_is_bound_to_a_key() -> TestResult {
     let dir = TempDir::new()?;
     let storage = Storage::open_at(&dir.path().join("unbound.redb"))?;
     let crypto = Crypto::from_key([3u8; 32]);
@@ -236,7 +229,7 @@ fn writes_are_refused_until_the_storage_is_bound_to_a_key() -> Result<(), Box<dy
 }
 
 #[test]
-fn atomic_reset_rebuilds_vault_under_new_key() -> Result<(), Box<dyn std::error::Error>> {
+fn atomic_reset_rebuilds_vault_under_new_key() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "secret123")?)?;
 
@@ -254,7 +247,7 @@ fn atomic_reset_rebuilds_vault_under_new_key() -> Result<(), Box<dyn std::error:
 }
 
 #[test]
-fn atomic_reset_drops_entries_absent_from_the_new_set() -> Result<(), Box<dyn std::error::Error>> {
+fn atomic_reset_drops_entries_absent_from_the_new_set() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "secret123")?)?;
     storage.create_password("beta", &make_entry(&crypto, "beta", "secret456")?)?;
@@ -273,7 +266,7 @@ fn atomic_reset_drops_entries_absent_from_the_new_set() -> Result<(), Box<dyn st
 }
 
 #[test]
-fn salt_and_verification_metadata_are_recorded_at_init() -> Result<(), Box<dyn std::error::Error>> {
+fn salt_and_verification_metadata_are_recorded_at_init() -> TestResult {
     let (_dir, storage, crypto) = setup_vault()?;
     assert_eq!(storage.get_salt()?, Some(Crypto::encode_salt(&[4u8; 32])));
     assert_eq!(
@@ -284,7 +277,7 @@ fn salt_and_verification_metadata_are_recorded_at_init() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn second_open_of_a_locked_database_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn second_open_of_a_locked_database_is_rejected() -> TestResult {
     let dir = TempDir::new()?;
     let path = dir.path().join("vault.redb");
     let _first = Storage::open_at(&path)?;
@@ -297,8 +290,7 @@ fn second_open_of_a_locked_database_is_rejected() -> Result<(), Box<dyn std::err
 }
 
 #[test]
-fn dump_and_restore_preserves_vault_and_rejects_tampered_headers()
--> Result<(), Box<dyn std::error::Error>> {
+fn dump_and_restore_preserves_vault_and_rejects_tampered_headers() -> TestResult {
     let (dump_dir, source, source_crypto) = setup_vault()?;
     source.create_password("one", &make_entry(&source_crypto, "one", "secret_one")?)?;
     source.create_password("two", &make_entry(&source_crypto, "two", "secret_two")?)?;
@@ -324,23 +316,27 @@ fn dump_and_restore_preserves_vault_and_rejects_tampered_headers()
 }
 
 #[test]
-fn dump_file_name_follows_the_dump_pattern() -> Result<(), Box<dyn std::error::Error>> {
+fn dump_file_name_follows_the_dump_pattern() -> TestResult {
     let (dump_dir, storage, crypto) = setup_vault()?;
     let path = storage.write_dump(dump_dir.path(), &crypto)?;
 
-    let name = path
+    let file_name = path
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(|name| name.to_str())
         .ok_or("no file name")?;
-    assert!(name.starts_with("dump_"));
-    assert!(name.ends_with(".bin"));
-    assert_eq!(name.len(), "dump_".len() + 20 + ".bin".len());
+    assert!(file_name.starts_with("dump_"));
+    assert!(
+        Path::new(file_name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("bin"))
+    );
+    assert_eq!(file_name.len(), "dump_".len() + 20 + ".bin".len());
     Ok(())
 }
 
 #[cfg(unix)]
 #[test]
-fn dump_files_are_owner_only() -> Result<(), Box<dyn std::error::Error>> {
+fn dump_files_are_owner_only() -> TestResult {
     use std::os::unix::fs::PermissionsExt;
 
     let (dump_dir, storage, crypto) = setup_vault()?;
@@ -351,7 +347,7 @@ fn dump_files_are_owner_only() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn tampered_dump_ciphertext_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+fn tampered_dump_ciphertext_is_rejected() -> TestResult {
     let (dump_dir, storage, crypto) = setup_vault()?;
     storage.create_password("alpha", &make_entry(&crypto, "alpha", "pass1234")?)?;
     let path = storage.write_dump(dump_dir.path(), &crypto)?;
@@ -366,7 +362,7 @@ fn tampered_dump_ciphertext_is_rejected() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[test]
-fn empty_vault_dump_round_trips_with_zero_user_entries() -> Result<(), Box<dyn std::error::Error>> {
+fn empty_vault_dump_round_trips_with_zero_user_entries() -> TestResult {
     let (dump_dir, storage, crypto) = setup_vault()?;
     let path = storage.write_dump(dump_dir.path(), &crypto)?;
 
@@ -377,7 +373,7 @@ fn empty_vault_dump_round_trips_with_zero_user_entries() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn restore_replaces_existing_contents() -> Result<(), Box<dyn std::error::Error>> {
+fn restore_replaces_existing_contents() -> TestResult {
     let (dump_dir, source, source_crypto) = setup_vault()?;
     source.create_password("one", &make_entry(&source_crypto, "one", "secret_one")?)?;
     let path = source.write_dump(dump_dir.path(), &source_crypto)?;
@@ -395,7 +391,7 @@ fn restore_replaces_existing_contents() -> Result<(), Box<dyn std::error::Error>
 }
 
 #[test]
-fn restore_discards_the_failed_attempt_counter() -> Result<(), Box<dyn std::error::Error>> {
+fn restore_discards_the_failed_attempt_counter() -> TestResult {
     let (dump_dir, source, source_crypto) = setup_vault()?;
     source.create_password("one", &make_entry(&source_crypto, "one", "secret_one")?)?;
     source.put_raw(b"__throttle__", &9u32.to_le_bytes())?;

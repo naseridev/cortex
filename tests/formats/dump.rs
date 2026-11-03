@@ -1,5 +1,7 @@
 use cortex::core::dump::{Dump, DumpFile};
 
+use crate::common::{TestResult, failure};
+
 fn sample_dump() -> DumpFile {
     DumpFile {
         salt: vec![2u8; 33],
@@ -9,7 +11,7 @@ fn sample_dump() -> DumpFile {
 }
 
 #[test]
-fn binary_dump_format_round_trips() -> Result<(), String> {
+fn binary_dump_format_round_trips() -> TestResult {
     let original = sample_dump();
     let encoded = Dump::encode(&original)?;
     let decoded = Dump::decode(&encoded)?;
@@ -21,7 +23,7 @@ fn binary_dump_format_round_trips() -> Result<(), String> {
 }
 
 #[test]
-fn encoded_layout_is_version_then_little_endian_salt_length() -> Result<(), String> {
+fn encoded_layout_is_version_then_little_endian_salt_length() -> TestResult {
     let bytes = Dump::encode(&sample_dump())?;
 
     assert_eq!(bytes[0], 3);
@@ -31,30 +33,33 @@ fn encoded_layout_is_version_then_little_endian_salt_length() -> Result<(), Stri
 }
 
 #[test]
-fn legacy_and_previous_dump_versions_report_upgrade_guidance() {
-    let v1_err = Dump::decode(&[1, 0, 0, 0])
-        .err()
-        .expect("legacy dump must be rejected");
+fn legacy_and_previous_dump_versions_report_upgrade_guidance() -> TestResult {
+    let v1_err = failure(Dump::decode(&[1, 0, 0, 0]))?;
     assert!(v1_err.contains("old backup format"));
 
-    let v2_err = Dump::decode(&[2, 0, 0, 0])
-        .err()
-        .expect("previous dump must be rejected");
+    let v2_err = failure(Dump::decode(&[2, 0, 0, 0]))?;
     assert!(v2_err.contains("older cortex version"));
+    Ok(())
 }
 
 #[test]
-fn unknown_dump_versions_are_reported_as_damaged() {
+fn unknown_dump_versions_are_reported_as_damaged() -> TestResult {
     for version in [0u8, 4, 255] {
-        let error = Dump::decode(&[version, 0, 0, 0])
-            .err()
-            .expect("unknown version must be rejected");
+        let error = failure(Dump::decode(&[version, 0, 0, 0]))?;
         assert_eq!(error, "Unsupported or damaged dump file");
     }
+    Ok(())
 }
 
 #[test]
-fn truncated_dumps_are_rejected_at_every_structural_boundary() -> Result<(), String> {
+fn malformed_dumps_are_rejected() {
+    assert!(Dump::decode(&[]).is_err());
+    assert!(Dump::decode(&[3, 33]).is_err());
+    assert!(Dump::decode(&[99, 0, 0]).is_err());
+}
+
+#[test]
+fn truncated_dumps_are_rejected_at_every_structural_boundary() -> TestResult {
     let bytes = Dump::encode(&sample_dump())?;
 
     for cut in [0, 1, 2, 3, 20, 46, 47, 48] {
@@ -65,7 +70,7 @@ fn truncated_dumps_are_rejected_at_every_structural_boundary() -> Result<(), Str
 }
 
 #[test]
-fn declared_salt_length_must_fit_the_payload() -> Result<(), String> {
+fn declared_salt_length_must_fit_the_payload() -> TestResult {
     let mut forged = Dump::encode(&sample_dump())?;
     forged[1..3].copy_from_slice(&500u16.to_le_bytes());
     assert!(Dump::decode(&forged).is_err());
@@ -73,7 +78,7 @@ fn declared_salt_length_must_fit_the_payload() -> Result<(), String> {
 }
 
 #[test]
-fn encode_rejects_salts_that_exceed_the_length_field() -> Result<(), String> {
+fn encode_rejects_salts_that_exceed_the_length_field() -> TestResult {
     let oversized = DumpFile {
         salt: vec![0u8; 65_536],
         nonce: [0u8; 12],
@@ -92,19 +97,13 @@ fn encode_rejects_salts_that_exceed_the_length_field() -> Result<(), String> {
 }
 
 #[test]
-fn empty_ciphertext_is_not_a_valid_dump() {
+fn empty_ciphertext_is_not_a_valid_dump() -> TestResult {
     let empty = DumpFile {
         salt: vec![2u8; 33],
         nonce: [7u8; 12],
         ciphertext: Vec::new(),
     };
-    let bytes = Dump::encode(&empty).expect("encoding does not check ciphertext");
+    let bytes = Dump::encode(&empty)?;
     assert!(Dump::decode(&bytes).is_err());
-}
-
-#[test]
-fn malformed_dumps_are_rejected() {
-    assert!(Dump::decode(&[]).is_err());
-    assert!(Dump::decode(&[3, 33]).is_err());
-    assert!(Dump::decode(&[99, 0, 0]).is_err());
+    Ok(())
 }

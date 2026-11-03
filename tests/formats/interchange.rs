@@ -4,6 +4,8 @@ use cortex::core::limits::MAX_ENTRIES;
 use cortex::core::types::{EncryptedExport, ExportData, ExportEntry};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::common::{TestResult, failure};
+
 fn sample_entries() -> Vec<ExportEntry> {
     vec![
         ExportEntry {
@@ -31,7 +33,7 @@ fn export_entry(
         name: name.to_string(),
         password: password.to_string(),
         description: description.map(str::to_string),
-        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        tags: tags.iter().map(ToString::to_string).collect(),
     }
 }
 
@@ -60,10 +62,9 @@ fn build_encrypted_export(
 }
 
 #[test]
-fn csv_serialization_preserves_multiline_and_special_delimiters() -> Result<(), String> {
+fn csv_serialization_preserves_multiline_and_special_delimiters() -> TestResult {
     let entries = sample_entries();
-    let csv_text =
-        String::from_utf8(Interchange::encode_csv(&entries)?).map_err(|e| e.to_string())?;
+    let csv_text = String::from_utf8(Interchange::encode_csv(&entries)?)?;
     assert!(Interchange::is_csv(&csv_text));
 
     let decoded = Interchange::decode_csv(&csv_text)?;
@@ -78,15 +79,14 @@ fn csv_serialization_preserves_multiline_and_special_delimiters() -> Result<(), 
 }
 
 #[test]
-fn csv_output_starts_with_the_canonical_header() -> Result<(), String> {
-    let bytes = Interchange::encode_csv(&sample_entries())?;
-    let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+fn csv_output_starts_with_the_canonical_header() -> TestResult {
+    let text = String::from_utf8(Interchange::encode_csv(&sample_entries())?)?;
     assert_eq!(text.lines().next(), Some(CSV_HEADER));
     Ok(())
 }
 
 #[test]
-fn csv_handles_utf8_bom_crlf_and_blank_lines() -> Result<(), String> {
+fn csv_handles_utf8_bom_crlf_and_blank_lines() -> TestResult {
     let raw = format!("\u{feff}{CSV_HEADER}\r\n\r\nbank,secret123,,work;ops\r\n\r\n");
     assert!(Interchange::is_csv(&raw));
 
@@ -106,12 +106,11 @@ fn csv_rejects_invalid_headers_and_column_counts() {
 }
 
 #[test]
-fn csv_rejects_rows_with_too_many_fields() {
+fn csv_rejects_rows_with_too_many_fields() -> TestResult {
     let text = format!("{CSV_HEADER}\nname,secret123,,tags,extra\n");
-    let error = Interchange::decode_csv(&text)
-        .err()
-        .expect("row must be rejected");
+    let error = failure(Interchange::decode_csv(&text))?;
     assert!(error.contains("has 5 fields"));
+    Ok(())
 }
 
 #[test]
@@ -121,7 +120,7 @@ fn csv_header_detection_is_exact() {
 }
 
 #[test]
-fn csv_without_data_rows_decodes_to_no_entries() -> Result<(), String> {
+fn csv_without_data_rows_decodes_to_no_entries() -> TestResult {
     let text = format!("{CSV_HEADER}\n");
     assert!(Interchange::decode_csv(&text)?.is_empty());
     Ok(())
@@ -146,7 +145,7 @@ fn csv_enforces_maximum_entry_limit() {
 }
 
 #[test]
-fn csv_accepts_exactly_the_maximum_entry_count() -> Result<(), String> {
+fn csv_accepts_exactly_the_maximum_entry_count() -> TestResult {
     let mut csv_text = format!("{CSV_HEADER}\n");
     for _ in 0..MAX_ENTRIES {
         csv_text.push_str("item,password123,,\n");
@@ -156,8 +155,7 @@ fn csv_accepts_exactly_the_maximum_entry_count() -> Result<(), String> {
 }
 
 #[test]
-fn encrypted_export_round_trips_and_verifies_passphrase() -> Result<(), Box<dyn std::error::Error>>
-{
+fn encrypted_export_round_trips_and_verifies_passphrase() -> TestResult {
     let entries = sample_entries();
     let pass = Zeroizing::new("Export#Pass123".to_string());
     let wrong = Zeroizing::new("Wrong#Pass123".to_string());
@@ -174,22 +172,19 @@ fn encrypted_export_round_trips_and_verifies_passphrase() -> Result<(), Box<dyn 
 }
 
 #[test]
-fn encrypted_export_with_tampered_ciphertext_is_rejected() -> Result<(), Box<dyn std::error::Error>>
-{
+fn encrypted_export_with_tampered_ciphertext_is_rejected() -> TestResult {
     let pass = Zeroizing::new("Export#Pass123".to_string());
     let bytes = build_encrypted_export(&pass, &sample_entries(), 100)?;
     let mut parsed = Interchange::parse_encrypted(&bytes)?;
     parsed.ciphertext[0] ^= 0x01;
 
-    let error = Interchange::open_encrypted(&pass, &parsed)
-        .err()
-        .expect("tampering must be detected");
+    let error = failure(Interchange::open_encrypted(&pass, &parsed))?;
     assert_eq!(error, "Wrong export passphrase or damaged export file");
     Ok(())
 }
 
 #[test]
-fn encrypted_export_rejects_payload_version_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+fn encrypted_export_rejects_payload_version_mismatch() -> TestResult {
     let pass = Zeroizing::new("Export#Pass123".to_string());
     let (crypto, salt) = Crypto::create(&pass)?;
     let payload = serde_json::to_vec(&ExportData {
@@ -205,16 +200,13 @@ fn encrypted_export_rejects_payload_version_mismatch() -> Result<(), Box<dyn std
         ciphertext,
     };
 
-    let error = Interchange::open_encrypted(&pass, &file)
-        .err()
-        .expect("mismatch must be rejected");
+    let error = failure(Interchange::open_encrypted(&pass, &file))?;
     assert_eq!(error, "Export header and payload versions do not match");
     Ok(())
 }
 
 #[test]
-fn parse_encrypted_rejects_non_json_and_unknown_versions() -> Result<(), Box<dyn std::error::Error>>
-{
+fn parse_encrypted_rejects_non_json_and_unknown_versions() -> TestResult {
     let not_json = Interchange::parse_encrypted(b"plain text");
     assert!(
         not_json
@@ -229,9 +221,7 @@ fn parse_encrypted_rejects_non_json_and_unknown_versions() -> Result<(), Box<dyn
         ciphertext: vec![1u8; 16],
     };
     let bytes = serde_json::to_vec(&file)?;
-    let error = Interchange::parse_encrypted(&bytes)
-        .err()
-        .expect("old version must be rejected");
+    let error = failure(Interchange::parse_encrypted(&bytes))?;
     assert_eq!(error, "Unsupported export version: 3.0.0");
     Ok(())
 }
@@ -272,7 +262,7 @@ fn import_validation_rejects_control_characters_in_descriptions() {
 }
 
 #[test]
-fn import_validation_normalizes_a_valid_entry() -> Result<(), String> {
+fn import_validation_normalizes_a_valid_entry() -> TestResult {
     let mut valid = export_entry("github", "valid_password_123", Some(""), &["Dev", "dev"]);
     assert!(!Interchange::would_fail_import(&valid));
     Interchange::validate_import(&mut valid)?;
@@ -283,7 +273,7 @@ fn import_validation_normalizes_a_valid_entry() -> Result<(), String> {
 }
 
 #[test]
-fn stored_validation_accepts_legacy_short_passwords() -> Result<(), String> {
+fn stored_validation_accepts_legacy_short_passwords() -> TestResult {
     let mut legacy = export_entry("legacy", "short", None, &[]);
     Interchange::validate_stored(&mut legacy)?;
     Ok(())
@@ -296,17 +286,19 @@ fn stored_validation_rejects_descriptions_that_leak_the_password() {
 }
 
 #[test]
-fn stored_validation_rejects_passwords_longer_than_the_byte_limit() {
+fn stored_validation_rejects_passwords_longer_than_the_byte_limit() -> TestResult {
     let mut long = export_entry("long", &"p".repeat(129), None, &[]);
-    let error = Interchange::validate_stored(&mut long).expect_err("limit must be enforced");
+    let error = failure(Interchange::validate_stored(&mut long))?;
     assert_eq!(error, "Password exceeds 128 bytes");
+    Ok(())
 }
 
 #[test]
-fn stored_validation_rejects_descriptions_over_the_byte_limit() {
+fn stored_validation_rejects_descriptions_over_the_byte_limit() -> TestResult {
     let mut long = export_entry("long", "pass1234", Some(&"d".repeat(501)), &[]);
-    let error = Interchange::validate_stored(&mut long).expect_err("limit must be enforced");
+    let error = failure(Interchange::validate_stored(&mut long))?;
     assert_eq!(error, "Description exceeds 500 bytes");
+    Ok(())
 }
 
 #[test]
@@ -319,7 +311,7 @@ fn stored_validation_rejects_reserved_and_empty_names() {
 }
 
 #[test]
-fn stored_validation_normalizes_and_rejects_invalid_tags() -> Result<(), String> {
+fn stored_validation_normalizes_and_rejects_invalid_tags() -> TestResult {
     let mut tagged = export_entry("bank", "pass1234", None, &["B", "a", "b"]);
     Interchange::validate_stored(&mut tagged)?;
     assert_eq!(tagged.tags, vec!["a".to_string(), "b".to_string()]);

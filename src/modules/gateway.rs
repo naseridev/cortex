@@ -1,7 +1,6 @@
 use crate::{
     core::{
         accounts::Accounts,
-        config::Config,
         crypto::Crypto,
         limits::{
             MAX_PASSWORD_ATTEMPTS_PER_RUN, THROTTLE_FREE_FAILURES, THROTTLE_MAX_DELAY_SECONDS,
@@ -81,7 +80,7 @@ impl Gateway {
             return Self::finish_login(storage, crypto);
         }
 
-        if let Some(crypto) = Self::restore_session(&storage, &header)? {
+        if let Some(crypto) = Self::restore_session(&header)? {
             return Self::finish_login(storage, crypto);
         }
 
@@ -96,14 +95,14 @@ impl Gateway {
     }
 
     pub fn login_for_mcp(name: &str) -> Result<(Storage, Crypto), Box<dyn std::error::Error>> {
-        let (storage, header) = Self::open_account_vault_without_cache(name)?;
+        let (storage, header) = Self::open_existing_account_vault(name)?;
 
         if let Some(crypto) = Self::restore_agent_key(name, &header)? {
             return Self::finish_login(storage, crypto);
         }
 
         if Accounts::active()?.as_deref() == Some(name)
-            && let Some(mut key) = Session::load_session(&storage)?
+            && let Some(mut key) = Session::load_session()?
         {
             let crypto = Crypto::from_key(key);
             key.zeroize();
@@ -141,11 +140,8 @@ impl Gateway {
         Ok(None)
     }
 
-    fn restore_session(
-        storage: &Storage,
-        header: &VaultHeader,
-    ) -> Result<Option<Crypto>, Box<dyn std::error::Error>> {
-        let Some(mut key) = Session::load_session(storage)? else {
+    fn restore_session(header: &VaultHeader) -> Result<Option<Crypto>, Box<dyn std::error::Error>> {
+        let Some(mut key) = Session::load_session()? else {
             return Ok(None);
         };
 
@@ -175,7 +171,7 @@ impl Gateway {
         let active =
             Accounts::active()?.ok_or("No accounts found. Create one with 'account create'.")?;
         let storage = Storage::open_account(&active)?;
-        let (storage, header) = Self::read_header(storage, true)?;
+        let (storage, header) = Self::read_header(storage)?;
 
         Ok((active, storage, header))
     }
@@ -194,10 +190,10 @@ impl Gateway {
         }
 
         let storage = Storage::open_account(name)?;
-        Self::read_header(storage, true)
+        Self::read_header(storage)
     }
 
-    fn open_account_vault_without_cache(
+    fn open_existing_account_vault(
         name: &str,
     ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
         if !Accounts::exists(name)? {
@@ -205,18 +201,10 @@ impl Gateway {
         }
 
         let storage = Storage::open_account(name)?;
-        Self::read_header(storage, false)
+        Self::read_header(storage)
     }
 
-    fn read_header(
-        storage: Storage,
-        refresh_config_cache: bool,
-    ) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
-        if refresh_config_cache {
-            Config::clear_cache();
-            Config::load_from_db(&storage)?;
-        }
-
+    fn read_header(storage: Storage) -> Result<(Storage, VaultHeader), Box<dyn std::error::Error>> {
         let salt = storage
             .get_salt()?
             .ok_or("Database salt not found. Database may be corrupted.")?;

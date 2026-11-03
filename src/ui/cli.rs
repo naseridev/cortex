@@ -79,12 +79,6 @@ pub enum Commands {
         #[arg(help = "Path to a dump file created by the dump command")]
         file: String,
     },
-
-    #[command(about = "Manage configuration settings")]
-    Config {
-        #[command(subcommand)]
-        action: Option<ConfigAction>,
-    },
 }
 
 #[derive(Subcommand)]
@@ -218,18 +212,6 @@ pub enum McpAction {
             help = "Also permanently delete all [agent] accounts"
         )]
         purge_accounts: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum ConfigAction {
-    #[command(about = "Show current configuration")]
-    Show,
-
-    #[command(about = "Set session timeout in seconds")]
-    SetTimeout {
-        #[arg(help = "Timeout in seconds (60-86400)")]
-        seconds: u64,
     },
 }
 

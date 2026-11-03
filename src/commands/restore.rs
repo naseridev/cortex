@@ -1,7 +1,6 @@
 use crate::{
     core::{
-        config::Config, crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage,
-        validation::Validation,
+        crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage, validation::Validation,
     },
     modules::security::Security,
     modules::session::Session,
@@ -44,7 +43,6 @@ impl Restore {
         storage.replace_with_dump(&snapshot)?;
 
         Session::clear_session()?;
-        Config::clear_cache();
 
         println!("Database restored from dump.");
         println!("Unlock it with the master password that was active when the dump was created.");

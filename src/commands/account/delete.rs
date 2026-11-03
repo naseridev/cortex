@@ -1,6 +1,6 @@
 use super::resolve_name;
 use crate::{
-    core::{accounts::Accounts, config::Config, validation::Validation},
+    core::{accounts::Accounts, validation::Validation},
     modules::{gateway::Gateway, security::Security, session::Session},
 };
 
@@ -29,7 +29,6 @@ pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     if was_active {
         Session::clear_session()?;
-        Config::clear_cache();
     }
 
     println!("Deleted account '{account_name}'.");

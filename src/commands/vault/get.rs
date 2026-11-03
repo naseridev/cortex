@@ -4,7 +4,7 @@ use crate::{
 };
 use zeroize::Zeroizing;
 
-const CLIPBOARD_SECONDS: u64 = 30;
+const CLIPBOARD_SECONDS: u64 = 60;
 
 pub struct Get;
 

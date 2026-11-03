@@ -1,7 +1,7 @@
 use super::resolve_name;
 use crate::{
     core::{
-        accounts::Accounts, config::Config, crypto::Crypto, password::Password, storage::Storage,
+        accounts::Accounts, crypto::Crypto, password::Password, storage::Storage,
         validation::Validation,
     },
     modules::session::Session,
@@ -33,7 +33,6 @@ pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     drop(storage);
 
     Accounts::register(&account_name)?;
-    Config::clear_cache();
 
     if let Err(error) = Session::save_session(crypto.key()) {
         eprintln!("Warning: session could not be stored: {error}");

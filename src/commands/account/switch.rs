@@ -1,6 +1,6 @@
 use super::resolve_name;
 use crate::{
-    core::{accounts::Accounts, config::Config, validation::Validation},
+    core::{accounts::Accounts, validation::Validation},
     modules::session::Session,
 };
 
@@ -24,7 +24,6 @@ pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     Accounts::switch(&account_name)?;
     Session::clear_session()?;
-    Config::clear_cache();
 
     println!("Switched to account '{account_name}'.");
     Ok(())

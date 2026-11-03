@@ -1,9 +1,10 @@
-use crate::core::{config::Config, storage::Storage, time::Time};
+use crate::core::time::Time;
 use keyring::Entry;
 use zeroize::Zeroize;
 
 const SERVICE_NAME: &str = "cortex";
 const ACCOUNT_NAME: &str = "vault-session";
+const SESSION_TIMEOUT_SECONDS: u64 = 480;
 const MAX_SESSION_AGE: u64 = 86400;
 const TIMESTAMP_BYTES: usize = 8;
 const KEY_BYTES: usize = 32;
@@ -30,7 +31,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn load_session(storage: &Storage) -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
+    pub fn load_session() -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
         let Ok(entry) = Self::entry() else {
             return Ok(None);
         };
@@ -54,10 +55,9 @@ impl Session {
         key.copy_from_slice(&record[TIMESTAMP_BYTES..]);
         record.zeroize();
 
-        let config = Config::load_from_db(storage)?;
         let elapsed = Time::current_timestamp().saturating_sub(timestamp);
 
-        if elapsed > config.session_timeout_seconds || elapsed > MAX_SESSION_AGE {
+        if elapsed > SESSION_TIMEOUT_SECONDS || elapsed > MAX_SESSION_AGE {
             key.zeroize();
             Self::clear_session()?;
             return Ok(None);

@@ -1,5 +1,5 @@
 use arboard::Clipboard;
-use std::{thread, time::Duration};
+use std::{sync::mpsc, time::Duration};
 
 pub fn copy_then_clear(text: &str, seconds: u64) -> Result<(), Box<dyn std::error::Error>> {
     let mut clipboard = Clipboard::new().map_err(|error| {
@@ -10,8 +10,16 @@ pub fn copy_then_clear(text: &str, seconds: u64) -> Result<(), Box<dyn std::erro
         .set_text(text)
         .map_err(|error| format!("Failed to copy the password: {error}"))?;
 
-    println!("Password copied to the clipboard. It will be cleared in {seconds} seconds.");
-    thread::sleep(Duration::from_secs(seconds));
+    let (interrupt_sender, interrupt_receiver) = mpsc::channel();
+    ctrlc::set_handler(move || {
+        let _ = interrupt_sender.send(());
+    })
+    .map_err(|error| format!("Failed to install the Ctrl+C handler: {error}"))?;
+
+    println!(
+        "Password copied to the clipboard. It will be cleared in {seconds} seconds. Press Ctrl+C to clear it now and exit."
+    );
+    let _ = interrupt_receiver.recv_timeout(Duration::from_secs(seconds));
 
     if let Ok(current) = clipboard.get_text()
         && current == text

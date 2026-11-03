@@ -3,7 +3,7 @@ use cortex::{
     commands::{
         account::Account, config::ConfigCmd, create::Create, delete::Delete, dump::Dump,
         edit::Edit, export::Export, find::Find, get::Get, import::Import, list::List, lock::Lock,
-        mcp::Mcp, pass::Pass, reset::Reset, restore::Restore, tag::Tag,
+        mcp::Mcp, pass::Pass, restore::Restore, tag::Tag,
     },
     core::{password::PasswordCharset, tags::TagValidator},
     ui::cli::{AccountAction, Cli, Commands, ConfigAction, McpAction, TagAction},
@@ -38,7 +38,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => Find::execute(&pattern, ignore_case, names_only),
         Commands::Export => Export::execute(),
         Commands::Import { file, overwrite } => Import::execute(&file, overwrite),
-        Commands::Reset => Reset::execute(),
         Commands::Dump => Dump::execute(),
         Commands::Restore { file } => Restore::execute(&file),
         Commands::Lock => Lock::execute(),
@@ -76,6 +75,7 @@ fn run_account(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> 
         AccountAction::Edit { name, new_name } => Account::edit(name, new_name),
         AccountAction::Delete { name } => Account::delete(name),
         AccountAction::Switch { name } => Account::switch(name),
+        AccountAction::Reset { name } => Account::reset(name),
     }
 }
 

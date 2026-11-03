@@ -120,9 +120,6 @@ pub enum Commands {
         overwrite: bool,
     },
 
-    #[command(about = "Reset the master password")]
-    Reset,
-
     #[command(about = "Write an encrypted dump of the database to the current directory")]
     Dump,
 
@@ -170,6 +167,12 @@ pub enum AccountAction {
     #[command(about = "Switch between accounts")]
     Switch {
         #[arg(help = "Name of the account to switch to")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Reset the master password of an account")]
+    Reset {
+        #[arg(help = "Name of the account whose master password to reset")]
         name: Option<String>,
     },
 }

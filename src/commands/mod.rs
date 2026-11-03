@@ -12,6 +12,5 @@ pub mod list;
 pub mod lock;
 pub mod mcp;
 pub mod pass;
-pub mod reset;
 pub mod restore;
 pub mod tag;

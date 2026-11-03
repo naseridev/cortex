@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 pub(crate) const MANIFEST_KEY: &str = "__manifest__";
 pub(crate) const INTEGRITY_FAILED_MESSAGE: &str = "Database integrity check failed. Stored data was modified, replaced or removed outside of cortex.";
 pub(crate) const LEGACY_VAULT_MESSAGE: &str =
-    "This vault predates integrity protection. Run 'reset' once to upgrade it.";
+    "This vault predates integrity protection. Run 'account reset' once to upgrade it.";
 
 pub(crate) type Changes = BTreeMap<Vec<u8>, Option<Vec<u8>>>;
 pub(crate) type Records = Vec<(Vec<u8>, Vec<u8>)>;

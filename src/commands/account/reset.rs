@@ -69,9 +69,7 @@ fn perform_reset(account_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         "Account passwords were not changed. Change the password of every stored account now."
     );
 
-    println!(
-        "Passwords stored in this vault may already be exposed if someone else accessed it."
-    );
+    println!("Passwords stored in this vault may already be exposed if someone else accessed it.");
 
     println!(
         "Dumps created earlier still require the master password that was active when they were made."

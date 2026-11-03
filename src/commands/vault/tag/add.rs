@@ -21,8 +21,7 @@ pub fn execute(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Er
     let entry = load_entry(&storage, name)?;
 
     let mut merged_tags = crypto.decrypt_tags(name, &entry)?;
-    let existing_keys: HashSet<String> =
-        merged_tags.iter().map(|tag| tag.to_lowercase()).collect();
+    let existing_keys: HashSet<String> = merged_tags.iter().map(|tag| tag.to_lowercase()).collect();
 
     let mut added_count = 0;
     for tag in requested {

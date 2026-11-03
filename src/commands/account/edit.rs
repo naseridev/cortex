@@ -32,10 +32,9 @@ pub fn execute(
     }
 
     if Accounts::exists(&updated_name)? {
-        return Err(format!(
-            "Account '{updated_name}' already exists. Choose a different name."
-        )
-        .into());
+        return Err(
+            format!("Account '{updated_name}' already exists. Choose a different name.").into(),
+        );
     }
 
     Accounts::rename(&current_name, &updated_name)?;

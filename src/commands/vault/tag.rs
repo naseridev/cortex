@@ -23,10 +23,7 @@ pub fn run(action: TagAction) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn load_entry(
-    storage: &Storage,
-    name: &str,
-) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
+fn load_entry(storage: &Storage, name: &str) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
     let entry = storage
         .get_password(name)?
         .ok_or_else(|| format!("Entry '{name}' not found"))?;

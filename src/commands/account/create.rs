@@ -13,10 +13,9 @@ pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     Validation::check_account_name(&account_name)?;
 
     if Accounts::exists(&account_name)? {
-        return Err(format!(
-            "Account '{account_name}' already exists. Choose a different name."
-        )
-        .into());
+        return Err(
+            format!("Account '{account_name}' already exists. Choose a different name.").into(),
+        );
     }
 
     let master_password = UserPrompt::password("Master password: ")?;

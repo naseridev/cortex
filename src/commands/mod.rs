@@ -1,16 +1,9 @@
 pub mod account;
 pub mod config;
-pub mod create;
-pub mod delete;
 pub mod dump;
-pub mod edit;
 pub mod export;
-pub mod find;
-pub mod get;
 pub mod import;
-pub mod list;
-pub mod lock;
 pub mod mcp;
 pub mod pass;
 pub mod restore;
-pub mod tag;
+pub mod vault;

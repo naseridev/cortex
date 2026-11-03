@@ -29,6 +29,66 @@ pub enum Commands {
         action: McpAction,
     },
 
+    #[command(about = "Manage password entries, tags, and the vault session")]
+    Vault {
+        #[command(subcommand)]
+        action: VaultAction,
+    },
+
+    #[command(about = "Generate strong passwords")]
+    Pass {
+        #[arg(short = 'l', long, help = "Password length", default_value = "16")]
+        length: usize,
+        #[arg(
+            short = 'c',
+            long,
+            help = "Number of passwords to generate",
+            default_value = "1"
+        )]
+        count: usize,
+        #[arg(short = 'u', long, help = "Include uppercase letters")]
+        uppercase: bool,
+        #[arg(short = 'w', long, help = "Include lowercase letters")]
+        lowercase: bool,
+        #[arg(short = 'd', long, help = "Include digits")]
+        digits: bool,
+        #[arg(short = 's', long, help = "Include special characters")]
+        special: bool,
+    },
+
+    #[command(about = "Export all passwords to a plaintext CSV file in the current directory")]
+    Export,
+
+    #[command(about = "Import passwords from an encrypted export or a CSV export")]
+    Import {
+        #[arg(help = "Path to an encrypted export or CSV file to import")]
+        file: String,
+        #[arg(
+            short = 'o',
+            long = "overwrite",
+            help = "Overwrite existing entries with same name"
+        )]
+        overwrite: bool,
+    },
+
+    #[command(about = "Write an encrypted dump of the database to the current directory")]
+    Dump,
+
+    #[command(about = "Restore the database from a dump file, replacing its contents")]
+    Restore {
+        #[arg(help = "Path to a dump file created by the dump command")]
+        file: String,
+    },
+
+    #[command(about = "Manage configuration settings")]
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigAction>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum VaultAction {
     #[command(about = "Create a new password entry")]
     Create {
         #[arg(help = "Name/identifier for the password entry")]
@@ -82,57 +142,6 @@ pub enum Commands {
     Tag {
         #[command(subcommand)]
         action: TagAction,
-    },
-
-    #[command(about = "Generate strong passwords")]
-    Pass {
-        #[arg(short = 'l', long, help = "Password length", default_value = "16")]
-        length: usize,
-        #[arg(
-            short = 'c',
-            long,
-            help = "Number of passwords to generate",
-            default_value = "1"
-        )]
-        count: usize,
-        #[arg(short = 'u', long, help = "Include uppercase letters")]
-        uppercase: bool,
-        #[arg(short = 'w', long, help = "Include lowercase letters")]
-        lowercase: bool,
-        #[arg(short = 'd', long, help = "Include digits")]
-        digits: bool,
-        #[arg(short = 's', long, help = "Include special characters")]
-        special: bool,
-    },
-
-    #[command(about = "Export all passwords to a plaintext CSV file in the current directory")]
-    Export,
-
-    #[command(about = "Import passwords from an encrypted export or a CSV export")]
-    Import {
-        #[arg(help = "Path to an encrypted export or CSV file to import")]
-        file: String,
-        #[arg(
-            short = 'o',
-            long = "overwrite",
-            help = "Overwrite existing entries with same name"
-        )]
-        overwrite: bool,
-    },
-
-    #[command(about = "Write an encrypted dump of the database to the current directory")]
-    Dump,
-
-    #[command(about = "Restore the database from a dump file, replacing its contents")]
-    Restore {
-        #[arg(help = "Path to a dump file created by the dump command")]
-        file: String,
-    },
-
-    #[command(about = "Manage configuration settings")]
-    Config {
-        #[command(subcommand)]
-        action: Option<ConfigAction>,
     },
 
     #[command(about = "Clear authentication session and require re-login")]

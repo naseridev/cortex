@@ -242,7 +242,7 @@ impl Gateway {
     }
 
     fn apply_throttle(storage: &Storage) -> Result<(), Box<dyn std::error::Error>> {
-        let delay = throttle_delay_seconds(storage.failed_attempts()?);
+        let delay = Self::throttle_delay_seconds(storage.failed_attempts()?);
 
         if delay > 0 {
             eprintln!("Too many failed attempts. Waiting {delay}s before the next try.");
@@ -251,15 +251,15 @@ impl Gateway {
 
         Ok(())
     }
-}
 
-#[must_use]
-pub fn throttle_delay_seconds(failed_attempts: u32) -> u64 {
-    let Some(exponent) = failed_attempts.checked_sub(THROTTLE_FREE_FAILURES) else {
-        return 0;
-    };
+    #[must_use]
+    pub fn throttle_delay_seconds(failed_attempts: u32) -> u64 {
+        let Some(exponent) = failed_attempts.checked_sub(THROTTLE_FREE_FAILURES) else {
+            return 0;
+        };
 
-    1u64.checked_shl(exponent)
-        .unwrap_or(u64::MAX)
-        .min(THROTTLE_MAX_DELAY_SECONDS)
+        1u64.checked_shl(exponent)
+            .unwrap_or(u64::MAX)
+            .min(THROTTLE_MAX_DELAY_SECONDS)
+    }
 }

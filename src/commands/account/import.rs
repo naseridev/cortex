@@ -1,7 +1,7 @@
 use crate::{
     core::{
         crypto::Crypto,
-        interchange,
+        interchange::Interchange,
         limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
         types::{ExportEntry, PasswordEntry},
@@ -91,8 +91,8 @@ fn read_file(file_path: &str) -> Result<ImportSource, Box<dyn std::error::Error>
 
 fn parse_import(bytes: &[u8]) -> Result<ImportSource, Box<dyn std::error::Error>> {
     match std::str::from_utf8(bytes) {
-        Ok(text) if interchange::is_csv(text) || !text.trim_start().starts_with('{') => {
-            let entries = interchange::decode_csv(text)?;
+        Ok(text) if Interchange::is_csv(text) || !text.trim_start().starts_with('{') => {
+            let entries = Interchange::decode_csv(text)?;
             Ok(ImportSource {
                 format: "plaintext CSV",
                 version: None,
@@ -101,9 +101,9 @@ fn parse_import(bytes: &[u8]) -> Result<ImportSource, Box<dyn std::error::Error>
             })
         }
         _ => {
-            let file = interchange::parse_encrypted(bytes)?;
+            let file = Interchange::parse_encrypted(bytes)?;
             let passphrase = UserPrompt::password("Export passphrase: ")?;
-            let data = interchange::open_encrypted(&passphrase, &file)?;
+            let data = Interchange::open_encrypted(&passphrase, &file)?;
 
             Ok(ImportSource {
                 format: "encrypted export",
@@ -126,7 +126,7 @@ fn validate_entries(entries: Vec<ExportEntry>) -> (Vec<ExportEntry>, Vec<String>
             continue;
         }
 
-        match interchange::validate_import(&mut entry) {
+        match Interchange::validate_import(&mut entry) {
             Ok(()) => validated_entries.push(entry),
             Err(message) => validation_errors.push(format!("{}: {message}", entry.name)),
         }

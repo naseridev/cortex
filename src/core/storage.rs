@@ -5,12 +5,9 @@ use crate::core::{
     accounts::Accounts,
     crypto::Crypto,
     dump::DumpFile,
-    integrity::{
-        Changes, MANIFEST_KEY, Records, digest_records, is_reserved_key, is_reserved_name,
-        verify_manifest,
-    },
+    integrity::{Changes, Integrity, MANIFEST_KEY, Records},
     limits::MAX_ENTRIES,
-    platform,
+    platform::Platform,
     types::PasswordEntry,
 };
 use redb::{Database, DatabaseError, ReadableDatabase, ReadableTable, TableDefinition};
@@ -31,14 +28,6 @@ const MAX_SEARCH_PATTERN_BYTES: usize = 100;
 const LEGACY_DATABASE_MESSAGE: &str = "A database from an older cortex version was found. Export it to CSV with that version, run 'account create' here, then 'import' the CSV.";
 const DATABASE_LOCKED_MESSAGE: &str = "Database is locked by another process";
 
-pub(crate) fn encode_value<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
-    postcard::to_allocvec(value).map_err(|error| format!("Failed to serialize data: {error}"))
-}
-
-pub(crate) fn decode_value<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
-    postcard::from_bytes(bytes).map_err(|error| format!("Failed to deserialize data: {error}"))
-}
-
 pub struct Storage {
     db: Database,
     integrity: Cell<Option<[u8; 32]>>,
@@ -57,7 +46,7 @@ impl Storage {
 
     pub fn open_at(db_path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         if !db_path.exists() {
-            platform::create_private_file(db_path)
+            Platform::create_private_file(db_path)
                 .map(drop)
                 .map_err(|error| format!("Failed to create database file: {error}"))?;
         }
@@ -67,7 +56,7 @@ impl Storage {
             other => format!("Failed to open database: {other}"),
         })?;
 
-        platform::restrict_to_owner(db_path).map_err(|error| {
+        Platform::restrict_to_owner(db_path).map_err(|error| {
             format!(
                 "Failed to set permissions on {}: {error}",
                 db_path.display()
@@ -104,13 +93,13 @@ impl Storage {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut changes = Changes::new();
         for (key, _) in self.records()? {
-            if !is_reserved_key(&key) {
+            if !Integrity::is_reserved_key(&key) {
                 changes.insert(key, None);
             }
         }
 
         for (name, entry) in entries {
-            changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
+            changes.insert(name.as_bytes().to_vec(), Some(Self::encode_value(entry)?));
         }
 
         self.set_integrity(Some(crypto.integrity_key()));
@@ -121,7 +110,7 @@ impl Storage {
         let key = self.integrity_key()?;
         let records = self.records()?;
         let stored_manifest = self.get_raw(MANIFEST_KEY.as_bytes())?;
-        verify_manifest(&key, &records, stored_manifest)
+        Integrity::verify_manifest(&key, &records, stored_manifest)
     }
 
     pub fn get_salt(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
@@ -160,7 +149,7 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit_single(name, Some(encode_value(entry)?))?;
+        self.commit_single(name, Some(Self::encode_value(entry)?))?;
         Ok(true)
     }
 
@@ -171,7 +160,7 @@ impl Storage {
         let mut changes = Changes::new();
         for (name, entry) in entries {
             Self::check_writable_name(name)?;
-            changes.insert(name.as_bytes().to_vec(), Some(encode_value(entry)?));
+            changes.insert(name.as_bytes().to_vec(), Some(Self::encode_value(entry)?));
         }
 
         if changes.is_empty() {
@@ -185,12 +174,12 @@ impl Storage {
         &self,
         name: &str,
     ) -> Result<Option<PasswordEntry>, Box<dyn std::error::Error>> {
-        if is_reserved_name(name) {
+        if Integrity::is_reserved_name(name) {
             return Ok(None);
         }
 
         match self.get_raw(name.as_bytes())? {
-            Some(data) => Ok(Some(decode_value(&data)?)),
+            Some(data) => Ok(Some(Self::decode_value(&data)?)),
             None => Ok(None),
         }
     }
@@ -202,7 +191,7 @@ impl Storage {
     }
 
     pub fn delete_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if is_reserved_name(name) {
+        if Integrity::is_reserved_name(name) {
             return Err("Cannot delete system entries".into());
         }
 
@@ -223,7 +212,7 @@ impl Storage {
         name: &str,
         entry: &PasswordEntry,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        if is_reserved_name(name) {
+        if Integrity::is_reserved_name(name) {
             return Ok(false);
         }
 
@@ -231,7 +220,7 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit_single(name, Some(encode_value(entry)?))?;
+        self.commit_single(name, Some(Self::encode_value(entry)?))?;
         Ok(true)
     }
 
@@ -259,7 +248,7 @@ impl Storage {
                 }
             };
 
-            if is_reserved_name(&key_str) {
+            if Integrity::is_reserved_name(&key_str) {
                 continue;
             }
 
@@ -268,7 +257,7 @@ impl Storage {
                 return Err("Too many entries to search".into());
             }
 
-            match decode_value::<PasswordEntry>(&value) {
+            match Self::decode_value::<PasswordEntry>(&value) {
                 Ok(entry) => results.push((key_str, entry)),
                 Err(error) => eprintln!("Warning: skipping invalid entry '{key_str}': {error}"),
             }
@@ -285,8 +274,8 @@ impl Storage {
         for (key, value) in self.records()? {
             let key_str = String::from_utf8(key)?;
 
-            if !is_reserved_name(&key_str) {
-                let entry: PasswordEntry = decode_value(&value)?;
+            if !Integrity::is_reserved_name(&key_str) {
+                let entry: PasswordEntry = Self::decode_value(&value)?;
                 entries.push((key_str, entry));
             }
         }
@@ -406,7 +395,7 @@ impl Storage {
     }
 
     pub fn entry_exists(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        if is_reserved_name(name) {
+        if Integrity::is_reserved_name(name) {
             return Ok(false);
         }
 
@@ -418,7 +407,7 @@ impl Storage {
             return Err("Empty name not allowed".into());
         }
 
-        if is_reserved_name(name) {
+        if Integrity::is_reserved_name(name) {
             return Err("Reserved name prefix".into());
         }
 
@@ -469,7 +458,7 @@ impl Storage {
                 existing.push((db_key.value().to_vec(), db_value.value().to_vec()));
             }
 
-            let manifest = digest_records(&key, &existing, changes);
+            let manifest = Integrity::digest_records(&key, &existing, changes);
 
             for (name, value) in changes {
                 match value {
@@ -492,6 +481,14 @@ impl Storage {
         txn.commit()
             .map_err(|error| format!("Failed to write database: {error}"))?;
         Ok(())
+    }
+
+    pub(crate) fn encode_value<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+        postcard::to_allocvec(value).map_err(|error| format!("Failed to serialize data: {error}"))
+    }
+
+    pub(crate) fn decode_value<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
+        postcard::from_bytes(bytes).map_err(|error| format!("Failed to deserialize data: {error}"))
     }
 }
 

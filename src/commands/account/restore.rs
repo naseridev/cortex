@@ -1,6 +1,7 @@
 use crate::{
     core::{
-        crypto::Crypto, dump, limits::MAX_DUMP_BYTES, storage::Storage, validation::Validation,
+        crypto::Crypto, dump::Dump, limits::MAX_DUMP_BYTES, storage::Storage,
+        validation::Validation,
     },
     modules::security::Security,
     modules::session::Session,
@@ -20,7 +21,7 @@ pub fn execute(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let bytes = fs::read(path).map_err(|error| format!("Failed to read {file_path}: {error}"))?;
-    let file = dump::decode(&bytes)?;
+    let file = Dump::decode(&bytes)?;
 
     let password = UserPrompt::password("Master password used when this dump was created: ")?;
     let crypto = Crypto::open(&password, &file.salt)?;

@@ -1,5 +1,5 @@
 use crate::core::time::Time;
-use crate::core::types::{PasswordEntry, decode_secret_text};
+use crate::core::types::{PasswordEntry, SecretText};
 use argon2::{Algorithm, Argon2, Params, Version};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead, aead::Payload};
@@ -149,7 +149,7 @@ impl Crypto {
         let plaintext = self
             .open_field(name, FIELD_DESCRIPTION, nonce, ciphertext)
             .map_err(|error| format!("Description decryption failed: {error:?}"))?;
-        Ok(Some(decode_secret_text(plaintext)?))
+        Ok(Some(SecretText::decode(plaintext)?))
     }
 
     pub fn decrypt_tags(
@@ -256,7 +256,7 @@ impl Crypto {
             .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
 
         let nonce = Nonce::from(nonce_bytes);
-        let aad = associated_data(name, field);
+        let aad = Self::associated_data(name, field);
         let encrypted = self
             .cipher
             .encrypt(
@@ -294,7 +294,7 @@ impl Crypto {
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, chacha20poly1305::aead::Error> {
         let nonce = Nonce::from(*nonce_bytes);
-        let aad = associated_data(name, field);
+        let aad = Self::associated_data(name, field);
 
         self.cipher.decrypt(
             &nonce,
@@ -304,16 +304,16 @@ impl Crypto {
             },
         )
     }
-}
 
-fn associated_data(name: &str, field: &str) -> Vec<u8> {
-    let name_bytes = name.as_bytes();
-    let field_bytes = field.as_bytes();
-    let name_len = u32::try_from(name_bytes.len()).unwrap_or(u32::MAX);
+    fn associated_data(name: &str, field: &str) -> Vec<u8> {
+        let name_bytes = name.as_bytes();
+        let field_bytes = field.as_bytes();
+        let name_len = u32::try_from(name_bytes.len()).unwrap_or(u32::MAX);
 
-    let mut data = Vec::with_capacity(4 + name_bytes.len() + field_bytes.len());
-    data.extend_from_slice(&name_len.to_le_bytes());
-    data.extend_from_slice(name_bytes);
-    data.extend_from_slice(field_bytes);
-    data
+        let mut data = Vec::with_capacity(4 + name_bytes.len() + field_bytes.len());
+        data.extend_from_slice(&name_len.to_le_bytes());
+        data.extend_from_slice(name_bytes);
+        data.extend_from_slice(field_bytes);
+        data
+    }
 }

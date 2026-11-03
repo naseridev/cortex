@@ -1,6 +1,6 @@
 use crate::{
-    core::{types::decode_secret_text, validation::Validation},
-    modules::{clipboard, gateway::Gateway},
+    core::{types::SecretText, validation::Validation},
+    modules::{clipboard::PasswordClipboard, gateway::Gateway},
 };
 use zeroize::Zeroizing;
 
@@ -13,7 +13,7 @@ pub fn execute(name: &str, show: bool) -> Result<(), Box<dyn std::error::Error>>
         return Err(format!("Not found: {name}").into());
     };
 
-    let password = Zeroizing::new(decode_secret_text(crypto.decrypt_entry(name, &entry)?)?);
+    let password = Zeroizing::new(SecretText::decode(crypto.decrypt_entry(name, &entry)?)?);
     let description = crypto.decrypt_description(name, &entry)?;
     let tags = crypto.decrypt_tags(name, &entry)?;
 
@@ -32,7 +32,7 @@ pub fn execute(name: &str, show: bool) -> Result<(), Box<dyn std::error::Error>>
     }
 
     if !show {
-        clipboard::copy_then_clear(password.as_str(), CLIPBOARD_SECONDS)?;
+        PasswordClipboard::copy_then_clear(password.as_str(), CLIPBOARD_SECONDS)?;
     }
 
     Ok(())

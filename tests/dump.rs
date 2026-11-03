@@ -1,4 +1,4 @@
-use cortex::core::dump::{DumpFile, decode, encode};
+use cortex::core::dump::{Dump, DumpFile};
 
 fn sample_dump() -> DumpFile {
     DumpFile {
@@ -11,8 +11,8 @@ fn sample_dump() -> DumpFile {
 #[test]
 fn binary_dump_format_round_trips() -> Result<(), String> {
     let original = sample_dump();
-    let encoded = encode(&original)?;
-    let decoded = decode(&encoded)?;
+    let encoded = Dump::encode(&original)?;
+    let decoded = Dump::decode(&encoded)?;
 
     assert_eq!(decoded.salt, original.salt);
     assert_eq!(decoded.nonce, original.nonce);
@@ -22,20 +22,20 @@ fn binary_dump_format_round_trips() -> Result<(), String> {
 
 #[test]
 fn legacy_and_previous_dump_versions_report_upgrade_guidance() {
-    let v1_err = decode(&[1, 0, 0, 0]).err().unwrap_or_default();
+    let v1_err = Dump::decode(&[1, 0, 0, 0]).err().unwrap_or_default();
     assert!(v1_err.contains("old backup format"));
 
-    let v2_err = decode(&[2, 0, 0, 0]).err().unwrap_or_default();
+    let v2_err = Dump::decode(&[2, 0, 0, 0]).err().unwrap_or_default();
     assert!(v2_err.contains("older cortex version"));
 }
 
 #[test]
 fn malformed_or_truncated_dumps_are_rejected() {
-    assert!(decode(&[]).is_err());
-    assert!(decode(&[3, 33]).is_err());
-    assert!(decode(&[99, 0, 0]).is_err());
+    assert!(Dump::decode(&[]).is_err());
+    assert!(Dump::decode(&[3, 33]).is_err());
+    assert!(Dump::decode(&[99, 0, 0]).is_err());
 
-    let mut bytes = encode(&sample_dump()).unwrap_or_default();
+    let mut bytes = Dump::encode(&sample_dump()).unwrap_or_default();
     bytes.truncate(bytes.len() - 48);
-    assert!(decode(&bytes).is_err());
+    assert!(Dump::decode(&bytes).is_err());
 }

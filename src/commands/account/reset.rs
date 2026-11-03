@@ -4,7 +4,7 @@ use crate::{
         accounts::Accounts,
         crypto::Crypto,
         password::Password,
-        types::{PasswordEntry, decode_secret_text},
+        types::{PasswordEntry, SecretText},
         validation::Validation,
     },
     modules::{gateway::Gateway, session::Session},
@@ -96,7 +96,7 @@ fn decrypt_all(
     let mut plain_entries = Vec::with_capacity(stored_entries.len());
 
     for (name, entry) in stored_entries {
-        let password = Zeroizing::new(decode_secret_text(crypto.decrypt_entry(name, entry)?)?);
+        let password = Zeroizing::new(SecretText::decode(crypto.decrypt_entry(name, entry)?)?);
         let description = crypto.decrypt_description(name, entry)?;
         let tags = crypto.decrypt_tags(name, entry)?;
 

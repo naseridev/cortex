@@ -1,8 +1,5 @@
 use cortex::core::crypto::Crypto;
-use cortex::core::interchange::{
-    CSV_HEADER, FORMAT_VERSION, decode_csv, encode_csv, is_csv, open_encrypted, parse_encrypted,
-    validate_import, validate_stored, would_fail_import,
-};
+use cortex::core::interchange::{CSV_HEADER, FORMAT_VERSION, Interchange};
 use cortex::core::limits::MAX_ENTRIES;
 use cortex::core::types::{EncryptedExport, ExportEntry};
 use zeroize::{Zeroize, Zeroizing};
@@ -51,10 +48,11 @@ fn build_encrypted_export(
 #[test]
 fn csv_serialization_preserves_multiline_and_special_delimiters() -> Result<(), String> {
     let entries = sample_entries();
-    let csv_text = String::from_utf8(encode_csv(&entries)?).map_err(|e| e.to_string())?;
-    assert!(is_csv(&csv_text));
+    let csv_text =
+        String::from_utf8(Interchange::encode_csv(&entries)?).map_err(|e| e.to_string())?;
+    assert!(Interchange::is_csv(&csv_text));
 
-    let decoded = decode_csv(&csv_text)?;
+    let decoded = Interchange::decode_csv(&csv_text)?;
     assert_eq!(decoded.len(), entries.len());
     for (left, right) in entries.iter().zip(decoded.iter()) {
         assert_eq!(left.name, right.name);
@@ -68,9 +66,9 @@ fn csv_serialization_preserves_multiline_and_special_delimiters() -> Result<(), 
 #[test]
 fn csv_handles_utf8_bom_crlf_and_blank_lines() -> Result<(), String> {
     let raw = format!("\u{feff}{CSV_HEADER}\r\n\r\nbank,secret123,,work;ops\r\n\r\n");
-    assert!(is_csv(&raw));
+    assert!(Interchange::is_csv(&raw));
 
-    let decoded = decode_csv(&raw)?;
+    let decoded = Interchange::decode_csv(&raw)?;
     assert_eq!(decoded.len(), 1);
     assert_eq!(decoded[0].name, "bank");
     assert_eq!(decoded[0].description, None);
@@ -80,9 +78,9 @@ fn csv_handles_utf8_bom_crlf_and_blank_lines() -> Result<(), String> {
 
 #[test]
 fn csv_rejects_invalid_headers_and_column_counts() {
-    assert!(decode_csv("wrong,header\na,b\n").is_err());
-    assert!(decode_csv(&format!("{CSV_HEADER}\nonly_one_column\n")).is_err());
-    assert!(!is_csv("{\"version\":\"4.0.0\"}"));
+    assert!(Interchange::decode_csv("wrong,header\na,b\n").is_err());
+    assert!(Interchange::decode_csv(&format!("{CSV_HEADER}\nonly_one_column\n")).is_err());
+    assert!(!Interchange::is_csv("{\"version\":\"4.0.0\"}"));
 }
 
 #[test]
@@ -91,7 +89,7 @@ fn csv_enforces_maximum_entry_limit() {
     for _ in 0..=MAX_ENTRIES {
         csv_text.push_str("item,password123,,\n");
     }
-    assert!(decode_csv(&csv_text).is_err());
+    assert!(Interchange::decode_csv(&csv_text).is_err());
 }
 
 #[test]
@@ -101,12 +99,12 @@ fn encrypted_export_round_trips_and_verifies_passphrase() -> Result<(), String> 
     let wrong = Zeroizing::new("Wrong#Pass123".to_string());
 
     let bytes = build_encrypted_export(&pass, &entries, 100).map_err(|e| e.to_string())?;
-    let parsed = parse_encrypted(&bytes)?;
-    let data = open_encrypted(&pass, &parsed)?;
+    let parsed = Interchange::parse_encrypted(&bytes)?;
+    let data = Interchange::open_encrypted(&pass, &parsed)?;
 
     assert_eq!(data.timestamp, 100);
     assert_eq!(data.entries.len(), 2);
-    assert!(open_encrypted(&wrong, &parsed).is_err());
+    assert!(Interchange::open_encrypted(&wrong, &parsed).is_err());
     Ok(())
 }
 
@@ -118,8 +116,8 @@ fn import_and_stored_validators_enforce_security_constraints() -> Result<(), Str
         description: Some(String::new()),
         tags: vec!["Dev".to_string(), "dev".to_string()],
     };
-    assert!(!would_fail_import(&valid));
-    validate_import(&mut valid)?;
+    assert!(!Interchange::would_fail_import(&valid));
+    Interchange::validate_import(&mut valid)?;
     assert_eq!(valid.description, None);
     assert_eq!(valid.tags, vec!["dev".to_string()]);
 
@@ -129,9 +127,9 @@ fn import_and_stored_validators_enforce_security_constraints() -> Result<(), Str
         description: None,
         tags: Vec::new(),
     };
-    assert!(would_fail_import(&short_pass));
-    assert!(validate_import(&mut short_pass).is_err());
-    assert!(validate_stored(&mut short_pass).is_ok());
+    assert!(Interchange::would_fail_import(&short_pass));
+    assert!(Interchange::validate_import(&mut short_pass).is_err());
+    assert!(Interchange::validate_stored(&mut short_pass).is_ok());
 
     let mut leaked_pass = ExportEntry {
         name: "leaked".to_string(),
@@ -139,7 +137,7 @@ fn import_and_stored_validators_enforce_security_constraints() -> Result<(), Str
         description: Some("my supersecret note".to_string()),
         tags: Vec::new(),
     };
-    assert!(validate_stored(&mut leaked_pass).is_err());
+    assert!(Interchange::validate_stored(&mut leaked_pass).is_err());
 
     Ok(())
 }

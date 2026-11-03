@@ -2,8 +2,8 @@ use crate::{
     core::{
         crypto::Crypto,
         password::{Password, PasswordCharset},
-        platform,
-        storage::{Storage, decode_value, encode_value},
+        platform::Platform,
+        storage::Storage,
     },
     mcp::config::McpConfig,
 };
@@ -36,12 +36,12 @@ pub struct Accounts;
 impl Accounts {
     pub fn cortex_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
         let mut path =
-            platform::config_dir().ok_or("Could not determine the configuration directory")?;
+            Platform::config_dir().ok_or("Could not determine the configuration directory")?;
         path.push("cortex");
 
         fs::create_dir_all(&path)
             .map_err(|error| format!("Failed to create directory {}: {error}", path.display()))?;
-        platform::restrict_to_owner(&path)
+        Platform::restrict_to_owner(&path)
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
 
         Ok(path)
@@ -176,7 +176,7 @@ impl Accounts {
             format!("Failed to rename database from '{old_name}' to '{new_name}': {error}")
         })?;
 
-        platform::restrict_to_owner(&new_path).map_err(|error| {
+        Platform::restrict_to_owner(&new_path).map_err(|error| {
             format!(
                 "Failed to set permissions on {}: {error}",
                 new_path.display()
@@ -277,7 +277,7 @@ impl Accounts {
             .sync_all()
             .map_err(|error| format!("Failed to sync {}: {error}", path.display()))?;
 
-        platform::restrict_to_owner(temp.path())
+        Platform::restrict_to_owner(temp.path())
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
         temp.persist(path)
             .map_err(|error| format!("Failed to save {}: {}", path.display(), error.error))?;
@@ -301,10 +301,10 @@ impl Accounts {
             return Ok(AccountRegistry::default());
         }
 
-        let mut registry: AccountRegistry = if let Ok(reg) = decode_value(&bytes) {
+        let mut registry: AccountRegistry = if let Ok(reg) = Storage::decode_value(&bytes) {
             reg
         } else {
-            let legacy: LegacyAccountRegistry = decode_value(&bytes)
+            let legacy: LegacyAccountRegistry = Storage::decode_value(&bytes)
                 .map_err(|error| format!("Invalid accounts registry data: {error}"))?;
             AccountRegistry {
                 active: legacy.active,
@@ -340,7 +340,7 @@ impl Accounts {
 
     fn save_registry(registry: &AccountRegistry) -> Result<(), Box<dyn std::error::Error>> {
         let path = Self::registry_path()?;
-        let bytes = encode_value(registry)?;
+        let bytes = Storage::encode_value(registry)?;
         Self::write_atomic_file(&path, &bytes)
     }
 }

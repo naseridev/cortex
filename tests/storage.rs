@@ -1,5 +1,5 @@
 use cortex::core::crypto::Crypto;
-use cortex::core::dump;
+use cortex::core::dump::Dump;
 use cortex::core::storage::Storage;
 use cortex::core::types::PasswordEntry;
 use std::fs;
@@ -116,7 +116,7 @@ fn dump_and_restore_preserves_vault_and_rejects_tampered_headers()
     source.create_password("two", &make_entry(&source_crypto, "two", "secret_two")?)?;
 
     let dump_path = source.write_dump(dump_dir.path(), &source_crypto)?;
-    let mut dump_file = dump::decode(&fs::read(&dump_path)?)?;
+    let mut dump_file = Dump::decode(&fs::read(&dump_path)?)?;
 
     let snapshot = Storage::read_dump(&dump_file, &source_crypto)?;
     assert_eq!(snapshot.user_count(), 2);

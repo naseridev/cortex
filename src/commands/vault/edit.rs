@@ -3,7 +3,7 @@ use crate::{
         limits::{MAX_DESCRIPTION_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
         password::Password,
         tags::TagValidator,
-        types::decode_secret_text,
+        types::SecretText,
         validation::Validation,
     },
     modules::gateway::Gateway,
@@ -21,7 +21,7 @@ pub fn execute(name: &str, tags: Option<String>) -> Result<(), Box<dyn std::erro
         .get_password(name)?
         .ok_or_else(|| format!("Account '{name}' not found."))?;
 
-    let current_password = Zeroizing::new(decode_secret_text(crypto.decrypt_entry(name, &entry)?)?);
+    let current_password = Zeroizing::new(SecretText::decode(crypto.decrypt_entry(name, &entry)?)?);
     let current_description = crypto
         .decrypt_description(name, &entry)?
         .map(Zeroizing::new);

@@ -1,8 +1,4 @@
-use crate::core::{
-    accounts::Accounts,
-    storage::{decode_value, encode_value},
-    time::Time,
-};
+use crate::core::{accounts::Accounts, storage::Storage, time::Time};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -45,8 +41,8 @@ impl McpConfig {
             return Ok(Self::default());
         }
 
-        let mut config: Self =
-            decode_value(&bytes).map_err(|error| format!("Invalid MCP config data: {error}"))?;
+        let mut config: Self = Storage::decode_value(&bytes)
+            .map_err(|error| format!("Invalid MCP config data: {error}"))?;
 
         if McpPermission::parse(&config.permission).is_err() {
             config.permission = "000".to_string();
@@ -64,7 +60,7 @@ impl McpConfig {
     pub fn save(&self) -> Result<(), Box<dyn std::error::Error>> {
         McpPermission::parse(&self.permission)?;
         let path = Self::config_path()?;
-        let bytes = encode_value(self)?;
+        let bytes = Storage::encode_value(self)?;
         Accounts::write_atomic_file(&path, &bytes)
     }
 

@@ -7,7 +7,7 @@ use crate::{
         crypto::Crypto,
         storage::Storage,
         tags::TagValidator,
-        types::{PasswordEntry, decode_secret_text},
+        types::{PasswordEntry, SecretText},
     },
     ui::cli::TagAction,
 };
@@ -38,7 +38,7 @@ fn rewrite_entry(
     tags: Option<&[String]>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let decrypted = crypto.decrypt_entry(name, entry)?;
-    let password = Zeroizing::new(decode_secret_text(decrypted)?);
+    let password = Zeroizing::new(SecretText::decode(decrypted)?);
     let description = crypto.decrypt_description(name, entry)?;
 
     let updated = crypto.create_entry(name, password.as_bytes(), description.as_deref(), tags)?;

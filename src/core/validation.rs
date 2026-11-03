@@ -47,7 +47,7 @@ impl Validation {
             return Err("Invalid account name".to_string());
         }
 
-        if name.chars().any(is_unsafe_char) {
+        if name.chars().any(Self::is_unsafe_char) {
             return Err(
                 "Account name contains a control or hidden formatting character".to_string(),
             );
@@ -57,7 +57,7 @@ impl Validation {
     }
 
     pub fn check_description_text(description: &str) -> Result<(), String> {
-        if description.chars().any(is_unsafe_char) {
+        if description.chars().any(Self::is_unsafe_char) {
             return Err(
                 "Description contains a control or hidden formatting character".to_string(),
             );
@@ -71,7 +71,7 @@ impl Validation {
         let mut output = String::with_capacity(text.len());
 
         for ch in text.chars() {
-            if is_unsafe_char(ch) {
+            if Self::is_unsafe_char(ch) {
                 output.extend(ch.escape_default());
             } else {
                 output.push(ch);
@@ -80,16 +80,16 @@ impl Validation {
 
         output
     }
-}
 
-fn is_unsafe_char(ch: char) -> bool {
-    ch.is_control()
-        || matches!(
-            ch,
-            '\u{061c}'
-                | '\u{200b}'..='\u{200f}'
-                | '\u{202a}'..='\u{202e}'
-                | '\u{2066}'..='\u{2069}'
-                | '\u{feff}'
-        )
+    fn is_unsafe_char(ch: char) -> bool {
+        ch.is_control()
+            || matches!(
+                ch,
+                '\u{061c}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{feff}'
+            )
+    }
 }

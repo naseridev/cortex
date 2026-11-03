@@ -1,9 +1,9 @@
 use crate::core::{
     crypto::Crypto,
-    dump::{self, DumpFile},
-    integrity::{MANIFEST_KEY, Records, is_reserved_key, snapshot_digest},
-    platform,
-    storage::{INIT_MARKER, SALT_KEY, Storage, decode_value, encode_value},
+    dump::{Dump, DumpFile},
+    integrity::{Integrity, MANIFEST_KEY, Records},
+    platform::Platform,
+    storage::{INIT_MARKER, SALT_KEY, Storage},
 };
 use std::fs;
 use std::io::Write;
@@ -33,7 +33,7 @@ impl Snapshot {
             .open_dump(&file.nonce, &file.ciphertext)
             .map_err(|_| WRONG_PASSWORD_OR_DAMAGED_MESSAGE)?;
 
-        let parsed: Result<Records, String> = decode_value(&plain);
+        let parsed: Result<Records, String> = Storage::decode_value(&plain);
         plain.zeroize();
 
         let entries = parsed.map_err(|_| INVALID_DUMP_MESSAGE)?;
@@ -57,7 +57,7 @@ impl Snapshot {
         }
 
         let stored_manifest = <[u8; 32]>::try_from(manifest).map_err(|_| INVALID_DUMP_MESSAGE)?;
-        let expected = snapshot_digest(&crypto.integrity_key(), &entries);
+        let expected = Integrity::snapshot_digest(&crypto.integrity_key(), &entries);
 
         if blake3::Hash::from(stored_manifest) != expected {
             return Err(DUMP_INTEGRITY_MESSAGE.into());
@@ -65,7 +65,7 @@ impl Snapshot {
 
         let user_count = entries
             .iter()
-            .filter(|(name, _)| !is_reserved_key(name))
+            .filter(|(name, _)| !Integrity::is_reserved_key(name))
             .count();
 
         Ok(Self {
@@ -88,14 +88,14 @@ impl Snapshot {
             .ok_or("Database salt not found. Database may be corrupted.")?;
 
         let records = storage.records()?;
-        let mut plain = encode_value(&records)?;
+        let mut plain = Storage::encode_value(&records)?;
         drop(records);
 
         let sealed = crypto.seal_dump(&plain);
         plain.zeroize();
 
         let (ciphertext, nonce) = sealed?;
-        let bytes = dump::encode(&DumpFile {
+        let bytes = Dump::encode(&DumpFile {
             salt,
             nonce,
             ciphertext,
@@ -122,7 +122,7 @@ impl Snapshot {
             .sync_all()
             .map_err(|error| format!("Failed to write dump {}: {error}", path.display()))?;
 
-        platform::restrict_to_owner(temp.path())
+        Platform::restrict_to_owner(temp.path())
             .map_err(|error| format!("Failed to set permissions on {}: {error}", path.display()))?;
         temp.persist_noclobber(path)
             .map_err(|error| format!("Failed to save dump {}: {}", path.display(), error.error))?;

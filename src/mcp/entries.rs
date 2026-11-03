@@ -2,7 +2,7 @@ use crate::{
     core::{
         limits::{MAX_DESCRIPTION_BYTES, MAX_PASSWORD_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
         password::{Password, PasswordCharset},
-        types::decode_secret_text,
+        types::SecretText,
         validation::Validation,
     },
     mcp::{
@@ -64,7 +64,7 @@ impl McpEntries {
         let decrypted = crypto
             .decrypt_entry(&name, &entry)
             .map_err(|e| e.to_string())?;
-        let password = Zeroizing::new(decode_secret_text(decrypted).map_err(|e| e.to_string())?);
+        let password = Zeroizing::new(SecretText::decode(decrypted).map_err(|e| e.to_string())?);
 
         let description = crypto
             .decrypt_description(&name, &entry)
@@ -204,7 +204,7 @@ impl McpEntries {
             .ok_or_else(|| format!("Entry '{name}' not found in account '{account_name}'."))?;
 
         let current_password = Zeroizing::new(
-            decode_secret_text(
+            SecretText::decode(
                 crypto
                     .decrypt_entry(&name, &existing)
                     .map_err(|e| e.to_string())?,

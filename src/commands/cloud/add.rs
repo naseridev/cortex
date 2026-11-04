@@ -1,6 +1,6 @@
 use crate::{
     cloud::{
-        config::CloudConfig,
+        config::{CloudConfig, CredentialStorage},
         provider::{CloudCredentials, ProviderSettings},
     },
     core::validation::Validation,
@@ -12,8 +12,16 @@ pub fn execute(provider: CloudProvider) -> Result<(), Box<dyn std::error::Error>
     let (remote_name, settings, creds) = configure_provider(provider)?;
     Validation::check_account_name(&remote_name)?;
     let kind = settings.kind();
-    config.add_remote(&remote_name, settings, &creds)?;
+    let storage = config.add_remote(&remote_name, settings, &creds)?;
     println!("Configured {kind} cloud remote '{remote_name}'.");
+    if storage == CredentialStorage::Passphrase {
+        println!(
+            "Warning: the system keyring is unavailable, so the cloud credentials were encrypted with a separate passphrase."
+        );
+        println!(
+            "You will be asked for that passphrase on every cloud operation for remote '{remote_name}'."
+        );
+    }
     Ok(())
 }
 

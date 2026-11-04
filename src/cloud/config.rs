@@ -1,6 +1,10 @@
 use crate::{
     cloud::provider::{CloudCredentials, ProviderSettings},
-    core::{accounts::Accounts, storage::Storage, validation::Validation},
+    core::{
+        accounts::Accounts, crypto::Crypto, password::Password, storage::Storage,
+        validation::Validation,
+    },
+    ui::prompt::UserPrompt,
 };
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
@@ -11,6 +15,30 @@ use zeroize::{Zeroize, Zeroizing};
 
 const CLOUD_CONFIG_FILE: &str = "cloud.bin";
 const KEYRING_SERVICE: &str = "cortex-cloud";
+const CLOUD_PASSPHRASE_PROMPT: &str = "Cloud credentials passphrase: ";
+const NEW_CLOUD_PASSPHRASE_PROMPT: &str =
+    "Keyring unavailable. Choose a cloud credentials passphrase: ";
+const CONFIRM_CLOUD_PASSPHRASE_PROMPT: &str = "Confirm cloud credentials passphrase: ";
+const FALLBACK_FORMAT_ERROR: &str =
+    "Stored cloud credentials use an unsupported format. Remove the remote and add it again.";
+const FALLBACK_DECRYPT_ERROR: &str =
+    "Could not decrypt the stored cloud credentials. Check the cloud credentials passphrase.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialStorage {
+    Keyring,
+    Passphrase,
+    NoSecret,
+}
+
+type StoredCredentials = (Option<Vec<u8>>, CredentialStorage);
+
+#[derive(Serialize, Deserialize)]
+struct SealedCredentials {
+    kdf: Vec<u8>,
+    nonce: [u8; 12],
+    ciphertext: Vec<u8>,
+}
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct SyncRecord {
@@ -69,16 +97,10 @@ impl CloudConfig {
         name: &str,
         settings: ProviderSettings,
         credentials: &CloudCredentials,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<CredentialStorage, Box<dyn std::error::Error>> {
         Validation::check_account_name(name)?;
 
-        let mut encoded = Zeroizing::new(Storage::encode_value(credentials)?);
-        let fallback = if Self::store_keyring_secret(name, &encoded).is_ok() {
-            None
-        } else {
-            Some(encoded.as_slice().to_vec())
-        };
-        encoded.zeroize();
+        let (fallback_credentials, storage) = Self::store_credentials(name, credentials)?;
 
         let existing_accounts = self
             .remotes
@@ -88,7 +110,7 @@ impl CloudConfig {
         let remote = CloudRemote {
             name: name.to_string(),
             settings,
-            fallback_credentials: fallback,
+            fallback_credentials,
             accounts: existing_accounts,
         };
 
@@ -97,7 +119,8 @@ impl CloudConfig {
             self.active_remote = Some(name.to_string());
         }
 
-        self.save()
+        self.save()?;
+        Ok(storage)
     }
 
     pub fn remove_remote(&mut self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -145,21 +168,24 @@ impl CloudConfig {
         remote: &CloudRemote,
     ) -> Result<CloudCredentials, Box<dyn std::error::Error>> {
         if let Some(mut secret) = Self::load_keyring_secret(&remote.name) {
-            let decoded = Storage::decode_value(&secret);
+            let decoded: Result<CloudCredentials, String> = Storage::decode_value(&secret);
             secret.zeroize();
             return Ok(decoded?);
         }
 
-        if let Some(fallback) = &remote.fallback_credentials {
-            let decoded: CloudCredentials = Storage::decode_value(fallback)?;
-            return Ok(decoded);
+        match remote.fallback_credentials.as_deref() {
+            None => Err(format!(
+                "Credentials for cloud remote '{}' were not found in the system keyring.",
+                remote.name
+            )
+            .into()),
+            Some([]) => Ok(CloudCredentials::default()),
+            Some(bytes) => {
+                Self::parse_sealed(bytes)?;
+                let passphrase = prompt_cloud_passphrase()?;
+                Self::open_credentials(bytes, &passphrase)
+            }
         }
-
-        Err(format!(
-            "Credentials for cloud remote '{}' were not found in the system keyring.",
-            remote.name
-        )
-        .into())
     }
 
     pub fn record_sync(
@@ -175,8 +201,84 @@ impl CloudConfig {
         Ok(())
     }
 
+    #[must_use]
+    pub fn holds_no_secret(credentials: &CloudCredentials) -> bool {
+        [
+            &credentials.token,
+            &credentials.refresh_token,
+            &credentials.client_id,
+            &credentials.client_secret,
+            &credentials.access_key,
+            &credentials.secret_key,
+            &credentials.password,
+        ]
+        .iter()
+        .all(|field| field.is_none())
+    }
+
+    pub fn seal_credentials(
+        credentials: &CloudCredentials,
+        passphrase: &Zeroizing<String>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let encoded = Zeroizing::new(Storage::encode_value(credentials)?);
+        let (crypto, kdf) = Crypto::create(passphrase)?;
+        let (ciphertext, nonce) = crypto.seal_blob(&encoded)?;
+        Ok(Storage::encode_value(&SealedCredentials {
+            kdf,
+            nonce,
+            ciphertext,
+        })?)
+    }
+
+    pub fn open_credentials(
+        sealed_bytes: &[u8],
+        passphrase: &Zeroizing<String>,
+    ) -> Result<CloudCredentials, Box<dyn std::error::Error>> {
+        let sealed = Self::parse_sealed(sealed_bytes)?;
+        let plaintext = Self::open_sealed(&sealed, passphrase)?;
+        let decoded: CloudCredentials = Storage::decode_value(&plaintext)?;
+        Ok(decoded)
+    }
+
     fn config_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         Ok(Accounts::cortex_dir()?.join(CLOUD_CONFIG_FILE))
+    }
+
+    fn store_credentials(
+        name: &str,
+        credentials: &CloudCredentials,
+    ) -> Result<StoredCredentials, Box<dyn std::error::Error>> {
+        if Self::holds_no_secret(credentials) {
+            Self::delete_keyring_secret(name);
+            return Ok((Some(Vec::new()), CredentialStorage::NoSecret));
+        }
+
+        let encoded = Zeroizing::new(Storage::encode_value(credentials)?);
+        if Self::store_keyring_secret(name, &encoded).is_ok() {
+            return Ok((None, CredentialStorage::Keyring));
+        }
+
+        let passphrase = prompt_new_cloud_passphrase()?;
+        let sealed = Self::seal_credentials(credentials, &passphrase)?;
+        Self::delete_keyring_secret(name);
+        Ok((Some(sealed), CredentialStorage::Passphrase))
+    }
+
+    fn parse_sealed(sealed_bytes: &[u8]) -> Result<SealedCredentials, Box<dyn std::error::Error>> {
+        let sealed: SealedCredentials =
+            Storage::decode_value(sealed_bytes).map_err(|_| FALLBACK_FORMAT_ERROR)?;
+        Ok(sealed)
+    }
+
+    fn open_sealed(
+        sealed: &SealedCredentials,
+        passphrase: &Zeroizing<String>,
+    ) -> Result<Zeroizing<Vec<u8>>, Box<dyn std::error::Error>> {
+        let crypto = Crypto::open(passphrase, &sealed.kdf).map_err(|_| FALLBACK_FORMAT_ERROR)?;
+        let plaintext = crypto
+            .open_blob(&sealed.nonce, &sealed.ciphertext)
+            .map_err(|_| FALLBACK_DECRYPT_ERROR)?;
+        Ok(Zeroizing::new(plaintext))
     }
 
     fn keyring_entry(name: &str) -> Result<Entry, Box<dyn std::error::Error>> {
@@ -202,4 +304,16 @@ impl CloudConfig {
             let _ = entry.delete_credential();
         }
     }
+}
+
+fn prompt_cloud_passphrase() -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+    UserPrompt::password(CLOUD_PASSPHRASE_PROMPT)
+}
+
+fn prompt_new_cloud_passphrase() -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+    let passphrase = UserPrompt::password(NEW_CLOUD_PASSPHRASE_PROMPT)?;
+    Password::security_check(&passphrase)?;
+    let confirmation = UserPrompt::password(CONFIRM_CLOUD_PASSPHRASE_PROMPT)?;
+    Password::match_check(&passphrase, &confirmation)?;
+    Ok(passphrase)
 }

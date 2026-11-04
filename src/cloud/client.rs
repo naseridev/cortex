@@ -41,12 +41,15 @@ impl CloudClient {
         settings: &ProviderSettings,
         creds: &CloudCredentials,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let operator = Self::build_operator(settings, creds)?;
+        Self::from_operator(operator)
+    }
+
+    pub fn from_operator(operator: Operator) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|error| format!("Failed to initialize cloud runtime: {error}"))?;
-
-        let operator = Self::build_operator(settings, creds)?;
         Ok(Self { operator, runtime })
     }
 

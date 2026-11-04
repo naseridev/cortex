@@ -4,5 +4,6 @@ mod clock;
 mod common;
 mod config;
 mod engine;
+mod faults;
 mod provider;
 mod tombstones;

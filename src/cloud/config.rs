@@ -167,7 +167,15 @@ impl CloudConfig {
     pub fn load_credentials(
         remote: &CloudRemote,
     ) -> Result<CloudCredentials, Box<dyn std::error::Error>> {
-        if let Some(mut secret) = Self::load_keyring_secret(&remote.name) {
+        Self::load_credentials_from(remote, Self::load_keyring_secret, prompt_cloud_passphrase)
+    }
+
+    pub fn load_credentials_from(
+        remote: &CloudRemote,
+        keyring: impl FnOnce(&str) -> Option<Vec<u8>>,
+        prompt: impl FnOnce() -> Result<Zeroizing<String>, Box<dyn std::error::Error>>,
+    ) -> Result<CloudCredentials, Box<dyn std::error::Error>> {
+        if let Some(mut secret) = keyring(&remote.name) {
             let decoded: Result<CloudCredentials, String> = Storage::decode_value(&secret);
             secret.zeroize();
             return Ok(decoded?);
@@ -182,7 +190,7 @@ impl CloudConfig {
             Some([]) => Ok(CloudCredentials::default()),
             Some(bytes) => {
                 Self::parse_sealed(bytes)?;
-                let passphrase = prompt_cloud_passphrase()?;
+                let passphrase = prompt()?;
                 Self::open_credentials(bytes, &passphrase)
             }
         }

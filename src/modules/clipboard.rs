@@ -1,5 +1,6 @@
 use arboard::Clipboard;
 use std::{sync::mpsc, time::Duration};
+use zeroize::Zeroize;
 
 pub struct PasswordClipboard;
 
@@ -26,12 +27,14 @@ impl PasswordClipboard {
         );
         let _ = interrupt_receiver.recv_timeout(Duration::from_secs(seconds));
 
-        if let Ok(current) = clipboard.get_text()
-            && current == text
-        {
-            clipboard
-                .set_text("")
-                .map_err(|error| format!("Failed to clear the clipboard: {error}"))?;
+        if let Ok(mut current) = clipboard.get_text() {
+            let matches = current == text;
+            current.zeroize();
+            if matches {
+                clipboard
+                    .set_text("")
+                    .map_err(|error| format!("Failed to clear the clipboard: {error}"))?;
+            }
         }
 
         Ok(())

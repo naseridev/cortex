@@ -2,6 +2,7 @@ use crate::core::{
     limits::MIN_ACCOUNT_PASSWORD_LENGTH,
     password::{Password, PasswordCharset},
 };
+use zeroize::Zeroizing;
 
 const MAX_PASSWORD_LENGTH: usize = 128;
 const MIN_COUNT: usize = 1;
@@ -28,12 +29,12 @@ pub fn execute(
     }
 
     for index in 1..=count {
-        let password = Password::generate(length, charset)?;
+        let password = Zeroizing::new(Password::generate(length, charset)?);
 
         if count > 1 {
-            println!("{index}: {password}");
+            println!("{index}: {}", password.as_str());
         } else {
-            println!("{password}");
+            println!("{}", password.as_str());
         }
     }
 

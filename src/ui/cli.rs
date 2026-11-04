@@ -153,8 +153,6 @@ pub enum CloudProvider {
         root: Option<String>,
         #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
         client_id: Option<String>,
-        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
-        client_secret: Option<String>,
     },
 
     #[command(about = "Connect a Dropbox remote")]
@@ -165,8 +163,6 @@ pub enum CloudProvider {
         root: Option<String>,
         #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
         client_id: Option<String>,
-        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
-        client_secret: Option<String>,
     },
 
     #[command(about = "Connect a Microsoft OneDrive remote")]
@@ -177,8 +173,6 @@ pub enum CloudProvider {
         root: Option<String>,
         #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
         client_id: Option<String>,
-        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
-        client_secret: Option<String>,
     },
 
     #[command(about = "Connect a Nextcloud remote")]

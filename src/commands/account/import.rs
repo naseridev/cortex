@@ -1,6 +1,7 @@
 use crate::{
     core::{
         crypto::Crypto,
+        dump::Dump,
         interchange::Interchange,
         limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
@@ -90,6 +91,13 @@ fn read_file(file_path: &str) -> Result<ImportSource, Box<dyn std::error::Error>
 }
 
 fn parse_import(bytes: &[u8]) -> Result<ImportSource, Box<dyn std::error::Error>> {
+    if Dump::decode(bytes).is_ok() {
+        return Err(
+            "This file is an encrypted database dump. Use 'cortex account restore' to restore it."
+                .into(),
+        );
+    }
+
     match std::str::from_utf8(bytes) {
         Ok(text) if Interchange::is_csv(text) || !text.trim_start().starts_with('{') => {
             let entries = Interchange::decode_csv(text)?;

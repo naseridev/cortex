@@ -33,20 +33,17 @@ fn configure_provider(
             name,
             root,
             client_id,
-            client_secret,
-        } => configure_oauth(OAuth::Gdrive, name, root, client_id, client_secret),
+        } => configure_oauth(OAuth::Gdrive, name, root, client_id),
         CloudProvider::Dropbox {
             name,
             root,
             client_id,
-            client_secret,
-        } => configure_oauth(OAuth::Dropbox, name, root, client_id, client_secret),
+        } => configure_oauth(OAuth::Dropbox, name, root, client_id),
         CloudProvider::Onedrive {
             name,
             root,
             client_id,
-            client_secret,
-        } => configure_oauth(OAuth::Onedrive, name, root, client_id, client_secret),
+        } => configure_oauth(OAuth::Onedrive, name, root, client_id),
         CloudProvider::Nextcloud {
             url,
             username,
@@ -154,13 +151,21 @@ fn configure_oauth(
     name: Option<String>,
     root: Option<String>,
     client_id: Option<String>,
-    client_secret: Option<String>,
 ) -> Result<ConfiguredRemote, Box<dyn std::error::Error>> {
     let alias = name.unwrap_or_else(|| backend.alias().to_string());
     Validation::check_account_name(&alias)?;
     let label = backend.label();
     let token = UserPrompt::token(&format!("{label} access token: "))?;
     let refresh = UserPrompt::optional_token(&format!("{label} refresh token (optional): "))?;
+    let clean_client_id = client_id
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty());
+    let client_secret = if clean_client_id.is_some() {
+        UserPrompt::optional_token(&format!("{label} client secret (optional): "))?
+            .map(|secret| secret.as_str().to_string())
+    } else {
+        None
+    };
     let root = root.unwrap_or_default();
     let settings = backend.settings(ProviderSettings::normalize_root(
         Some(root.as_str()),
@@ -169,7 +174,7 @@ fn configure_oauth(
     let creds = CloudCredentials::with_oauth(
         token.as_str().to_string(),
         refresh.map(|v| v.as_str().to_string()),
-        client_id,
+        clean_client_id,
         client_secret,
     );
     Ok((alias, settings, creds))

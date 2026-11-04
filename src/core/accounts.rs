@@ -7,6 +7,7 @@ use crate::{
     },
     mcp::config::McpConfig,
 };
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -15,6 +16,8 @@ use std::path::{Path, PathBuf};
 use zeroize::{Zeroize, Zeroizing};
 
 const ACCOUNTS_FILE: &str = "accounts.bin";
+const AGENT_KEYRING_SERVICE: &str = "cortex-agent";
+const AGENT_WRAP_CONTEXT: &str = "cortex agent local key wrap v1";
 const AGENT_MASTER_PASSWORD_LENGTH: usize = 32;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -80,13 +83,26 @@ impl Accounts {
 
     pub fn get_agent_key(name: &str) -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
         let registry = Self::load_registry()?;
-        Ok(registry.agent_keys.get(name).copied())
+        let Some(stored) = registry.agent_keys.get(name).copied() else {
+            return Ok(None);
+        };
+
+        if let Some(keyring_key) = Self::load_keyring_agent_key(name) {
+            return Ok(Some(keyring_key));
+        }
+
+        if stored == [0u8; 32] {
+            return Ok(None);
+        }
+
+        Ok(Some(Self::xor_agent_mask(name, &stored)?))
     }
 
     pub fn update_agent_key(name: &str, key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error>> {
         let mut registry = Self::load_registry()?;
         if registry.accounts.iter().any(|account| account == name) {
-            registry.agent_keys.insert(name.to_string(), *key);
+            let fallback = Self::persist_agent_secret(name, key)?;
+            registry.agent_keys.insert(name.to_string(), fallback);
             Self::save_registry(&registry)?;
         }
         Ok(())
@@ -126,7 +142,8 @@ impl Accounts {
             registry.accounts.sort();
         }
 
-        registry.agent_keys.insert(name.to_string(), *crypto.key());
+        let fallback = Self::persist_agent_secret(name, crypto.key())?;
+        registry.agent_keys.insert(name.to_string(), fallback);
 
         if registry.active.is_none() {
             registry.active = Some(name.to_string());
@@ -169,6 +186,8 @@ impl Accounts {
             return Err(format!("Account '{new_name}' already exists.").into());
         }
 
+        let agent_key = Self::get_agent_key(old_name)?;
+
         let old_path = Self::db_path(old_name)?;
         let new_path = Self::db_path(new_name)?;
 
@@ -191,8 +210,14 @@ impl Accounts {
 
         registry.accounts.sort();
 
-        if let Some(key) = registry.agent_keys.remove(old_name) {
-            registry.agent_keys.insert(new_name.to_string(), key);
+        if let Some(mut old_stored) = registry.agent_keys.remove(old_name) {
+            old_stored.zeroize();
+            Self::delete_keyring_agent_key(old_name);
+            if let Some(mut resolved_key) = agent_key {
+                let fallback = Self::persist_agent_secret(new_name, &resolved_key)?;
+                resolved_key.zeroize();
+                registry.agent_keys.insert(new_name.to_string(), fallback);
+            }
         }
 
         if registry.active.as_deref() == Some(old_name) {
@@ -230,6 +255,7 @@ impl Accounts {
         if let Some(mut key) = registry.agent_keys.remove(name) {
             key.zeroize();
         }
+        Self::delete_keyring_agent_key(name);
 
         let was_active = registry.active.as_deref() == Some(name);
         if was_active {
@@ -283,6 +309,63 @@ impl Accounts {
             .map_err(|error| format!("Failed to save {}: {}", path.display(), error.error))?;
 
         Ok(())
+    }
+
+    fn persist_agent_secret(
+        name: &str,
+        key: &[u8; 32],
+    ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        let wrapped = Self::xor_agent_mask(name, key)?;
+        let _ = Self::store_keyring_agent_key(name, key);
+        if Self::load_keyring_agent_key(name).as_ref() == Some(key) {
+            Ok([0u8; 32])
+        } else {
+            Ok(wrapped)
+        }
+    }
+
+    fn xor_agent_mask(
+        name: &str,
+        input: &[u8; 32],
+    ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        let dir = Self::cortex_dir()?;
+        let mut material = Vec::new();
+        material.extend_from_slice(dir.to_string_lossy().as_bytes());
+        material.push(0);
+        material.extend_from_slice(name.as_bytes());
+
+        let mut mask = blake3::derive_key(AGENT_WRAP_CONTEXT, &material);
+        let mut out = [0u8; 32];
+        for i in 0..32 {
+            out[i] = input[i] ^ mask[i];
+        }
+        mask.zeroize();
+        Ok(out)
+    }
+
+    fn store_keyring_agent_key(
+        name: &str,
+        key: &[u8; 32],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let entry = Entry::new(AGENT_KEYRING_SERVICE, name)?;
+        entry.set_secret(key)?;
+        Ok(())
+    }
+
+    fn load_keyring_agent_key(name: &str) -> Option<[u8; 32]> {
+        let entry = Entry::new(AGENT_KEYRING_SERVICE, name).ok()?;
+        let mut secret = entry.get_secret().ok()?;
+        let parsed = <[u8; 32]>::try_from(secret.as_slice()).ok();
+        secret.zeroize();
+        parsed
+    }
+
+    fn delete_keyring_agent_key(name: &str) {
+        if let Ok(entry) = Entry::new(AGENT_KEYRING_SERVICE, name)
+            && entry.get_secret().is_ok()
+        {
+            let _ = entry.delete_credential();
+        }
     }
 
     fn registry_path() -> Result<PathBuf, Box<dyn std::error::Error>> {

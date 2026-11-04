@@ -323,24 +323,20 @@ fn reconcile_both(
             local_hash,
             local_state.entries.len(),
         )?,
-        SyncStatus::RemoteAhead if same_key => handle_remote_ahead_same_key(
-            config,
-            remote,
-            account_name,
-            &storage,
-            &remote_snapshot,
-            remote_hash,
-            remote_state.entries.len(),
-        )?,
+        SyncStatus::RemoteAhead if same_key && last_hash == Some(local_hash) => {
+            handle_remote_ahead_same_key(
+                config,
+                remote,
+                account_name,
+                &storage,
+                &remote_snapshot,
+                remote_hash,
+                remote_state.entries.len(),
+            )?;
+        }
         SyncStatus::RemoteAhead | SyncStatus::Diverged => {
-            let empty = SyncState::default();
-            let base_local = if status == SyncStatus::RemoteAhead {
-                &empty
-            } else {
-                &local_state
-            };
             let report = SyncEngine::merge(
-                base_local,
+                &local_state,
                 &local_crypto,
                 &remote_state,
                 &remote_crypto,

@@ -10,13 +10,25 @@ use crate::{
     modules::{gateway::Gateway, session::Session},
     ui::prompt::UserPrompt,
 };
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct PlainEntry {
     pub name: String,
     pub password: Zeroizing<String>,
     pub description: Option<String>,
     pub tags: Vec<String>,
+    pub timestamp: u64,
+}
+
+impl Drop for PlainEntry {
+    fn drop(&mut self) {
+        if let Some(desc) = self.description.as_mut() {
+            desc.zeroize();
+        }
+        for tag in &mut self.tags {
+            tag.zeroize();
+        }
+    }
 }
 
 pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -105,6 +117,7 @@ pub fn decrypt_all(
             password,
             description,
             tags,
+            timestamp: entry.timestamp,
         });
     }
 
@@ -119,12 +132,13 @@ pub fn reencrypt_all(
 
     for plain in plain_entries {
         let tag_list = (!plain.tags.is_empty()).then_some(plain.tags.as_slice());
-        let entry = crypto.create_entry(
+        let mut entry = crypto.create_entry(
             &plain.name,
             plain.password.as_bytes(),
             plain.description.as_deref(),
             tag_list,
         )?;
+        entry.timestamp = plain.timestamp;
 
         updated_entries.push((plain.name.clone(), entry));
     }

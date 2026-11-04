@@ -1,4 +1,5 @@
 use rand::seq::{IndexedRandom, SliceRandom};
+use zeroize::Zeroize;
 
 const SPECIAL_CHARACTERS: &str = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 const LOWERCASE_CHARS: &str = "abcdefghijklmnopqrstuvwxyz";
@@ -6,6 +7,7 @@ const UPPERCASE_CHARS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DIGIT_CHARS: &str = "0123456789";
 const MIN_MASTER_PASSWORD_CHARS: usize = 8;
 const MIN_COMPARED_CHARS: usize = 3;
+const MAX_COMPARED_WINDOW: usize = 8;
 
 #[derive(Clone, Copy)]
 pub struct PasswordCharset(u8);
@@ -69,10 +71,13 @@ impl Password {
         }
 
         if pool.is_empty() {
+            required_chars.zeroize();
             return Err("No character types selected".to_string());
         }
 
         if required_chars.len() > length {
+            pool.zeroize();
+            required_chars.zeroize();
             return Err("Password length too short for required character types".to_string());
         }
 
@@ -81,12 +86,19 @@ impl Password {
         let mut password_chars = required_chars;
 
         for _ in 0..fill_count {
-            let &ch = pool.choose(&mut rng).ok_or("No character types selected")?;
+            let Some(&ch) = pool.choose(&mut rng) else {
+                pool.zeroize();
+                password_chars.zeroize();
+                return Err("No character types selected".to_string());
+            };
             password_chars.push(ch);
         }
 
+        pool.zeroize();
         password_chars.shuffle(&mut rng);
-        Ok(password_chars.into_iter().collect())
+        let result: String = password_chars.iter().copied().collect();
+        password_chars.zeroize();
+        Ok(result)
     }
 
     fn pick_random_char(chars: &[char]) -> Result<char, String> {
@@ -151,20 +163,28 @@ impl Password {
     }
 
     fn in_desc_found(password: &str, description: &str) -> bool {
-        let password_chars: Vec<char> = password.to_lowercase().chars().collect();
-        let description_lower = description.to_lowercase();
+        let mut password_chars: Vec<char> = password.to_lowercase().chars().collect();
+        let mut description_lower = description.to_lowercase();
 
         if password_chars.len() < MIN_COMPARED_CHARS
             || description_lower.chars().count() < MIN_COMPARED_CHARS
         {
+            password_chars.zeroize();
+            description_lower.zeroize();
             return false;
         }
 
-        let window_size = (password_chars.len() / 2).max(MIN_COMPARED_CHARS);
-        password_chars.windows(window_size).any(|window| {
-            let fragment: String = window.iter().collect();
-            description_lower.contains(&fragment)
-        })
+        let window_size = (password_chars.len() / 2).clamp(MIN_COMPARED_CHARS, MAX_COMPARED_WINDOW);
+        let found = password_chars.windows(window_size).any(|window| {
+            let mut fragment: String = window.iter().collect();
+            let hit = description_lower.contains(&fragment);
+            fragment.zeroize();
+            hit
+        });
+
+        password_chars.zeroize();
+        description_lower.zeroize();
+        found
     }
 
     pub fn in_desc_check(

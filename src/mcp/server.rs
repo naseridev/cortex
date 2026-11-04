@@ -1,8 +1,12 @@
 use crate::mcp::tools::McpTools;
 use serde_json::{Value, json};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
+use zeroize::Zeroize;
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
+const MAX_RPC_MESSAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_HEADER_LINE_BYTES: usize = 4_096;
+const MAX_HEADER_COUNT: usize = 32;
 
 pub struct McpServer;
 
@@ -12,12 +16,16 @@ impl McpServer {
         let mut reader = stdin.lock();
         let mut stdout = io::stdout();
 
-        while let Some(message) = Self::read_rpc_message(&mut reader)? {
+        while let Some(mut message) = Self::read_rpc_message(&mut reader)? {
             if message.trim().is_empty() {
+                message.zeroize();
                 continue;
             }
 
-            let parsed: Value = if let Ok(val) = serde_json::from_str(&message) {
+            let parsed: Result<Value, _> = serde_json::from_str(&message);
+            message.zeroize();
+
+            let parsed = if let Ok(val) = parsed {
                 val
             } else {
                 let err = Self::rpc_error(&Value::Null, -32700, "Parse error");
@@ -33,23 +41,64 @@ impl McpServer {
         Ok(())
     }
 
-    fn read_rpc_message<R: BufRead>(reader: &mut R) -> Result<Option<String>, io::Error> {
-        let mut line = String::new();
-        let bytes = reader.read_line(&mut line)?;
+    fn read_bounded_line<R: BufRead>(
+        reader: &mut R,
+        max_bytes: usize,
+    ) -> Result<Option<String>, io::Error> {
+        let mut raw = Vec::new();
+        let limit = max_bytes as u64 + 1;
+        let bytes = reader.take(limit).read_until(b'\n', &mut raw)?;
 
         if bytes == 0 {
             return Ok(None);
         }
 
+        if bytes > max_bytes {
+            raw.zeroize();
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "RPC line exceeds maximum allowed length",
+            ));
+        }
+
+        let line = String::from_utf8_lossy(&raw).into_owned();
+        raw.zeroize();
+        Ok(Some(line))
+    }
+
+    fn read_rpc_message<R: BufRead>(reader: &mut R) -> Result<Option<String>, io::Error> {
+        let Some(line) = Self::read_bounded_line(reader, MAX_RPC_MESSAGE_BYTES)? else {
+            return Ok(None);
+        };
+
         if line.to_ascii_lowercase().starts_with("content-length:") {
             let len_str = line["content-length:".len()..].trim();
-            let content_len: usize = len_str.parse().unwrap_or(0);
+            let content_len: usize = len_str.parse().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "Invalid Content-Length header")
+            })?;
 
+            if content_len > MAX_RPC_MESSAGE_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "RPC payload exceeds maximum allowed size",
+                ));
+            }
+
+            let mut header_count = 0usize;
             loop {
-                let mut header_line = String::new();
-                let n = reader.read_line(&mut header_line)?;
-                if n == 0 || header_line == "\r\n" || header_line == "\n" {
+                let Some(header_line) = Self::read_bounded_line(reader, MAX_HEADER_LINE_BYTES)?
+                else {
                     break;
+                };
+                if header_line == "\r\n" || header_line == "\n" {
+                    break;
+                }
+                header_count += 1;
+                if header_count > MAX_HEADER_COUNT {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Too many RPC headers",
+                    ));
                 }
             }
 
@@ -57,6 +106,7 @@ impl McpServer {
             reader.read_exact(&mut buf)?;
 
             let body = String::from_utf8_lossy(&buf).into_owned();
+            buf.zeroize();
             return Ok(Some(body));
         }
 
@@ -64,8 +114,10 @@ impl McpServer {
     }
 
     fn write_rpc_message<W: Write>(writer: &mut W, payload: &Value) -> Result<(), io::Error> {
-        let serialized = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
-        writeln!(writer, "{serialized}")?;
+        let mut serialized = serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string());
+        let write_res = writeln!(writer, "{serialized}");
+        serialized.zeroize();
+        write_res?;
         writer.flush()
     }
 

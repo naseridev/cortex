@@ -29,7 +29,7 @@ impl Gateway {
             return Self::finish_login(storage, crypto);
         }
 
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let crypto = Self::prompt_master_key(&storage, &header, true)?;
         Self::finish_login(storage, crypto)
     }
 
@@ -41,7 +41,7 @@ impl Gateway {
             return Ok((storage, crypto));
         }
 
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let crypto = Self::prompt_master_key(&storage, &header, true)?;
         storage.bind_integrity(&crypto);
         Ok((storage, crypto))
     }
@@ -53,7 +53,8 @@ impl Gateway {
             return Self::finish_login(storage, crypto);
         }
 
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let is_active = Accounts::active()?.as_deref() == Some(name);
+        let crypto = Self::prompt_master_key(&storage, &header, is_active)?;
         Self::finish_login(storage, crypto)
     }
 
@@ -67,7 +68,8 @@ impl Gateway {
             return Ok((storage, crypto));
         }
 
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let is_active = Accounts::active()?.as_deref() == Some(name);
+        let crypto = Self::prompt_master_key(&storage, &header, is_active)?;
 
         storage.bind_integrity(&crypto);
         Ok((storage, crypto))
@@ -84,7 +86,7 @@ impl Gateway {
             return Self::finish_login(storage, crypto);
         }
 
-        let crypto = Self::prompt_master_key(&storage, &header)?;
+        let crypto = Self::prompt_master_key(&storage, &header, true)?;
         let (storage, crypto) = Self::finish_login(storage, crypto)?;
 
         if let Err(error) = Session::save_session(crypto.key()) {
@@ -218,6 +220,7 @@ impl Gateway {
     fn prompt_master_key(
         storage: &Storage,
         header: &VaultHeader,
+        clear_session_on_fail: bool,
     ) -> Result<Crypto, Box<dyn std::error::Error>> {
         for attempt in 1..=MAX_PASSWORD_ATTEMPTS_PER_RUN {
             Self::apply_throttle(storage)?;
@@ -237,7 +240,9 @@ impl Gateway {
             }
         }
 
-        Session::clear_session()?;
+        if clear_session_on_fail {
+            Session::clear_session()?;
+        }
         Err("Authentication failed".into())
     }
 

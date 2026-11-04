@@ -47,8 +47,8 @@ impl Platform {
     #[cfg(windows)]
     pub fn config_dir() -> Option<PathBuf> {
         std::env::var_os("APPDATA")
-            .filter(|value| !value.is_empty())
             .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
     }
 
     #[cfg(not(any(unix, windows)))]
@@ -68,15 +68,31 @@ impl Platform {
     pub fn restrict_to_owner(path: &Path) -> io::Result<()> {
         use std::process::{Command, Stdio};
 
-        let user =
-            std::env::var("USERNAME").map_err(|_| io::Error::other("USERNAME is not set"))?;
+        let is_valid_ident = |s: &str| {
+            !s.is_empty()
+                && !s
+                    .chars()
+                    .any(|c| c.is_control() || matches!(c, ':' | '/' | '\\' | '"' | '*' | '?'))
+        };
+
+        let user = std::env::var("USERNAME")
+            .ok()
+            .filter(|u| is_valid_ident(u))
+            .ok_or_else(|| io::Error::other("Invalid or missing USERNAME"))?;
+
         let account = match std::env::var("USERDOMAIN") {
-            Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
+            Ok(domain) if is_valid_ident(&domain) => format!("{domain}\\{user}"),
             _ => user,
         };
 
+        let system_root = std::env::var_os("SystemRoot")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let icacls_bin = system_root.join("System32").join("icacls.exe");
+
         let rights = if path.is_dir() { "(OI)(CI)F" } else { "F" };
-        let status = Command::new("icacls")
+        let status = Command::new(icacls_bin)
             .arg(path)
             .arg("/inheritance:r")
             .arg("/grant:r")

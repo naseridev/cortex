@@ -6,7 +6,7 @@ use crate::{
         engine::SyncEngine,
     },
     core::{accounts::Accounts, crypto::Crypto, dump::Dump, storage::Storage, time::Time},
-    modules::{security::Security, session::Session},
+    modules::{gateway::Gateway, security::Security, session::Session},
     ui::prompt::UserPrompt,
 };
 
@@ -36,6 +36,32 @@ pub fn execute(
     let snapshot = Storage::read_dump(&dump_file, &crypto)?;
 
     let local_exists = Accounts::exists(&account_name)?;
+    let storage = if local_exists {
+        let existing_storage = Storage::open_account(&account_name)?;
+        let matches_remote_password = existing_storage
+            .get_salt()?
+            .zip(existing_storage.get_verification_data()?)
+            .and_then(|(local_salt, local_ver)| {
+                Crypto::open(&password, &local_salt)
+                    .ok()
+                    .map(|local_crypto| local_crypto.matches_verification(&local_ver))
+            })
+            .unwrap_or(false);
+
+        if !matches_remote_password {
+            drop(existing_storage);
+            eprintln!(
+                "Local account '{account_name}' uses a different master password. Authenticate local account to replace it:"
+            );
+            let (authed_storage, _) = Gateway::login_account_for_recovery(&account_name)?;
+            authed_storage
+        } else {
+            existing_storage
+        }
+    } else {
+        Storage::open_account(&account_name)?
+    };
+
     if local_exists && !overwrite {
         Security::confirmation(&format!(
             "This will replace local account '{account_name}' with the cloud version ({} entries).",
@@ -43,7 +69,6 @@ pub fn execute(
         ))?;
     }
 
-    let storage = Storage::open_account(&account_name)?;
     storage.replace_with_dump(&snapshot)?;
     storage.bind_integrity(&crypto);
     storage.verify_integrity()?;
@@ -51,6 +76,8 @@ pub fn execute(
 
     if !local_exists {
         Accounts::register(&account_name)?;
+    } else if Accounts::is_agent(&account_name)? {
+        Accounts::update_agent_key(&account_name, crypto.key())?;
     }
 
     if Accounts::active()?.as_deref() == Some(account_name.as_str()) {

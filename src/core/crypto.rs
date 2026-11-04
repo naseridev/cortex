@@ -26,7 +26,6 @@ const INTEGRITY_CONTEXT: &str = "cortex vault integrity key v1";
 type OptionalSealed = (Option<Vec<u8>>, Option<[u8; NONCE_LENGTH]>);
 
 pub struct Crypto {
-    cipher: ChaCha20Poly1305,
     key: [u8; KEY_LENGTH],
 }
 
@@ -101,15 +100,15 @@ impl Crypto {
             self.seal_optional(name, FIELD_DESCRIPTION, description.map(str::as_bytes))?;
 
         let tags_json = match tags.filter(|list| !list.is_empty()) {
-            Some(list) => Some(
+            Some(list) => Some(Zeroizing::new(
                 serde_json::to_string(list)
                     .map_err(|error| format!("Tag serialization failed: {error}"))?,
-            ),
+            )),
             None => None,
         };
 
         let (encrypted_tags, tags_nonce) =
-            self.seal_optional(name, FIELD_TAGS, tags_json.as_deref().map(str::as_bytes))?;
+            self.seal_optional(name, FIELD_TAGS, tags_json.as_ref().map(|s| s.as_bytes()))?;
 
         Ok(PasswordEntry {
             encrypted_password,
@@ -161,9 +160,10 @@ impl Crypto {
             return Ok(Vec::new());
         };
 
-        let plaintext = self
-            .open_field(name, FIELD_TAGS, nonce, ciphertext)
-            .map_err(|error| format!("Tags decryption failed: {error:?}"))?;
+        let plaintext = Zeroizing::new(
+            self.open_field(name, FIELD_TAGS, nonce, ciphertext)
+                .map_err(|error| format!("Tags decryption failed: {error:?}"))?,
+        );
         let tags: Vec<String> = serde_json::from_slice(&plaintext)
             .map_err(|error| format!("Tag deserialization failed: {error}"))?;
 
@@ -209,8 +209,7 @@ impl Crypto {
     }
 
     fn from_parts(key: [u8; KEY_LENGTH]) -> Self {
-        let cipher = ChaCha20Poly1305::new((&key).into());
-        Self { cipher, key }
+        Self { key }
     }
 
     pub fn seal_blob(
@@ -255,10 +254,10 @@ impl Crypto {
         getrandom::fill(&mut nonce_bytes)
             .map_err(|error| format!("Failed to read OS randomness: {error}"))?;
 
+        let cipher = ChaCha20Poly1305::new((&self.key).into());
         let nonce = Nonce::from(nonce_bytes);
         let aad = Self::associated_data(name, field);
-        let encrypted = self
-            .cipher
+        let encrypted = cipher
             .encrypt(
                 &nonce,
                 Payload {
@@ -293,10 +292,11 @@ impl Crypto {
         nonce_bytes: &[u8; NONCE_LENGTH],
         ciphertext: &[u8],
     ) -> Result<Vec<u8>, chacha20poly1305::aead::Error> {
+        let cipher = ChaCha20Poly1305::new((&self.key).into());
         let nonce = Nonce::from(*nonce_bytes);
         let aad = Self::associated_data(name, field);
 
-        self.cipher.decrypt(
+        cipher.decrypt(
             &nonce,
             Payload {
                 msg: ciphertext,

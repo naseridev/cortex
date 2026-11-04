@@ -3,9 +3,10 @@ use crate::{
         config::{CloudConfig, CloudRemote},
         provider::{CloudCredentials, ProviderSettings},
     },
-    core::{accounts::Accounts, limits::MAX_DUMP_BYTES},
+    core::{accounts::Accounts, limits::MAX_DUMP_BYTES, platform::Platform},
 };
 use opendal::{ErrorKind, Operator, services};
+use std::path::{Path, PathBuf};
 use tokio::runtime::{Builder, Runtime};
 
 const VAULT_EXT: &str = ".cortex";
@@ -30,6 +31,7 @@ pub enum Precondition<'a> {
 pub struct CloudClient {
     operator: Operator,
     runtime: Runtime,
+    local_root: Option<PathBuf>,
 }
 
 impl CloudClient {
@@ -43,7 +45,11 @@ impl CloudClient {
         creds: &CloudCredentials,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let operator = Self::build_operator(settings, creds)?;
-        Self::from_operator(operator)
+        let mut client = Self::from_operator(operator)?;
+        if let ProviderSettings::Local { root } = settings {
+            client.local_root = Some(PathBuf::from(root));
+        }
+        Ok(client)
     }
 
     pub fn from_operator(operator: Operator) -> Result<Self, Box<dyn std::error::Error>> {
@@ -51,7 +57,11 @@ impl CloudClient {
             .enable_all()
             .build()
             .map_err(|error| format!("Failed to initialize cloud runtime: {error}"))?;
-        Ok(Self { operator, runtime })
+        Ok(Self {
+            operator,
+            runtime,
+            local_root: None,
+        })
     }
 
     #[must_use]
@@ -119,6 +129,7 @@ impl CloudClient {
                 .write(&tmp_path, bytes.to_vec())
                 .await
                 .map_err(|err| format!("Failed to write temporary cloud object: {err}"))?;
+            self.restrict_local_file(&tmp_path);
 
             let outcome = self
                 .publish(&main_path, &bak_path, bytes, precondition)
@@ -128,8 +139,22 @@ impl CloudClient {
                 eprintln!("Warning: could not remove temporary cloud object '{tmp_path}': {err}");
             }
 
+            if outcome.is_ok() {
+                self.restrict_local_file(&main_path);
+                self.restrict_local_file(&bak_path);
+            }
+
             outcome
         })
+    }
+
+    fn restrict_local_file(&self, relative_path: &str) {
+        if let Some(root) = &self.local_root {
+            let full_path = root.join(relative_path);
+            if full_path.is_file() {
+                let _ = Platform::restrict_to_owner(&full_path);
+            }
+        }
     }
 
     async fn publish(
@@ -346,6 +371,10 @@ impl CloudClient {
                 root,
             } => Self::build_webdav(endpoint, username.as_deref(), root, creds),
             ProviderSettings::Local { root } => {
+                let path = Path::new(root);
+                if !root.is_empty() && path.is_dir() {
+                    let _ = Platform::restrict_to_owner(path);
+                }
                 let builder = services::Fs::default().root(root);
                 Ok(Operator::new(builder)?.finish())
             }

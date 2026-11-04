@@ -1,7 +1,7 @@
 use super::resolve_account;
 use crate::{
     cloud::{
-        client::CloudClient,
+        client::{CloudClient, Precondition, RemoteVault},
         config::{CloudConfig, CloudRemote, SyncRecord},
         engine::{ClockSkew, MergeReport, SyncEngine, SyncState, SyncStatus},
     },
@@ -9,6 +9,22 @@ use crate::{
     modules::{gateway::Gateway, session::Session},
     ui::prompt::UserPrompt,
 };
+
+struct GuardedUpload<'a> {
+    client: &'a CloudClient,
+    account_name: &'a str,
+    observed: &'a RemoteVault,
+}
+
+impl GuardedUpload<'_> {
+    fn publish(&self, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        self.client.push_with(
+            self.account_name,
+            bytes,
+            Precondition::Unchanged(self.observed),
+        )
+    }
+}
 
 pub fn execute(
     remote_name: Option<&str>,
@@ -20,21 +36,17 @@ pub fn execute(
     let client = CloudClient::connect(&remote)?;
 
     let local_exists = Accounts::exists(&account_name)?;
-    let remote_blob = client.pull(&account_name)?;
+    let remote_vault = client.fetch(&account_name)?;
 
-    match (local_exists, remote_blob) {
+    match (local_exists, remote_vault) {
         (false, None) => Err(format!(
             "Account '{account_name}' does not exist locally or on remote '{}'.",
             remote.name
         )
         .into()),
-        (false, Some(remote_bytes)) => {
-            pull_new_account(&mut config, &remote, &account_name, &remote_bytes)
-        }
+        (false, Some(vault)) => pull_new_account(&mut config, &remote, &account_name, &vault.bytes),
         (true, None) => push_existing_account(&mut config, &remote, &client, &account_name),
-        (true, Some(remote_bytes)) => {
-            reconcile_both(&mut config, &remote, &client, &account_name, &remote_bytes)
-        }
+        (true, Some(vault)) => reconcile_both(&mut config, &remote, &client, &account_name, &vault),
     }
 }
 
@@ -89,7 +101,7 @@ fn push_existing_account(
     let dump_bytes = storage.encode_dump(&crypto)?;
     let local_hash = SyncEngine::digest(&dump_bytes);
 
-    client.push(account_name, &dump_bytes)?;
+    client.push_with(account_name, &dump_bytes, Precondition::Absent)?;
 
     config.record_sync(
         &remote.name,
@@ -130,8 +142,7 @@ fn record_sync_state(
 fn publish_merged(
     config: &mut CloudConfig,
     remote: &CloudRemote,
-    client: &CloudClient,
-    account_name: &str,
+    upload: &GuardedUpload<'_>,
     storage: &Storage,
     local_crypto: &Crypto,
     report: &MergeReport,
@@ -150,22 +161,23 @@ fn publish_merged(
 
     let merged_bytes = storage.encode_dump(local_crypto)?;
     let merged_hash = SyncEngine::digest(&merged_bytes);
-    client.push(account_name, &merged_bytes)?;
+    upload.publish(&merged_bytes)?;
 
-    if Accounts::active()?.as_deref() == Some(account_name) {
+    if Accounts::active()?.as_deref() == Some(upload.account_name) {
         let _ = Session::save_session(local_crypto.key());
     }
 
     record_sync_state(
         config,
         remote,
-        account_name,
+        upload.account_name,
         merged_hash,
         report.entries.len(),
     )?;
 
     println!(
-        "Synchronized '{account_name}' with '{}': {} added, {} updated, {} removed, {} kept (total: {}).",
+        "Synchronized '{}' with '{}': {} added, {} updated, {} removed, {} kept (total: {}).",
+        upload.account_name,
         remote.name,
         report.added_from_remote,
         report.updated_from_remote,
@@ -186,17 +198,16 @@ fn handle_identical(remote: &CloudRemote, account_name: &str) {
 fn handle_local_ahead(
     config: &mut CloudConfig,
     remote: &CloudRemote,
-    client: &CloudClient,
-    account_name: &str,
+    upload: &GuardedUpload<'_>,
     local_bytes: &[u8],
     local_hash: [u8; 32],
     entry_count: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    client.push(account_name, local_bytes)?;
-    record_sync_state(config, remote, account_name, local_hash, entry_count)?;
+    upload.publish(local_bytes)?;
+    record_sync_state(config, remote, upload.account_name, local_hash, entry_count)?;
     println!(
-        "Local vault is ahead. Uploaded '{account_name}' ({} entries) to '{}'.",
-        entry_count, remote.name
+        "Local vault is ahead. Uploaded '{}' ({} entries) to '{}'.",
+        upload.account_name, entry_count, remote.name
     );
     Ok(())
 }
@@ -246,14 +257,14 @@ fn reconcile_both(
     remote: &CloudRemote,
     client: &CloudClient,
     account_name: &str,
-    remote_bytes: &[u8],
+    observed: &RemoteVault,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (storage, local_crypto) = Gateway::login_account(account_name)?;
     let local_state = SyncState::from_storage(&storage)?;
     let local_clock = storage.clock()?;
     let local_bytes = storage.encode_dump(&local_crypto)?;
     let local_hash = SyncEngine::digest(&local_bytes);
-    let remote_hash = SyncEngine::digest(remote_bytes);
+    let remote_hash = SyncEngine::digest(&observed.bytes);
 
     if local_hash == remote_hash {
         record_sync_state(
@@ -268,7 +279,7 @@ fn reconcile_both(
     }
 
     let (remote_snapshot, remote_crypto, same_key) = SyncEngine::open_remote_snapshot(
-        remote_bytes,
+        &observed.bytes,
         &local_crypto,
         || {
             UserPrompt::password(&format!(
@@ -296,13 +307,18 @@ fn reconcile_both(
         remote_hash,
     );
 
+    let upload = GuardedUpload {
+        client,
+        account_name,
+        observed,
+    };
+
     match status {
         SyncStatus::Identical => handle_identical(remote, account_name),
         SyncStatus::LocalAhead => handle_local_ahead(
             config,
             remote,
-            client,
-            account_name,
+            &upload,
             &local_bytes,
             local_hash,
             local_state.entries.len(),
@@ -330,15 +346,7 @@ fn reconcile_both(
                 &remote_crypto,
                 same_key,
             )?;
-            publish_merged(
-                config,
-                remote,
-                client,
-                account_name,
-                &storage,
-                &local_crypto,
-                &report,
-            )?;
+            publish_merged(config, remote, &upload, &storage, &local_crypto, &report)?;
         }
     }
 

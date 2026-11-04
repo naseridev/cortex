@@ -11,6 +11,20 @@ use tokio::runtime::{Builder, Runtime};
 const VAULT_EXT: &str = ".cortex";
 const BACKUP_EXT: &str = ".cortex.bak";
 const TEMP_EXT: &str = ".cortex.tmp";
+const CHANGED_DURING_UPLOAD: &str = "Remote vault changed during the upload and was left untouched. Run 'cortex cloud sync' to merge the changes, then push again.";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteVault {
+    pub bytes: Vec<u8>,
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Precondition<'a> {
+    Any,
+    Absent,
+    Unchanged(&'a RemoteVault),
+}
 
 pub struct CloudClient {
     operator: Operator,
@@ -51,28 +65,47 @@ impl CloudClient {
         Self::format_filename(account_name, TEMP_EXT)
     }
 
-    pub fn pull(&self, account_name: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    pub fn fetch(
+        &self,
+        account_name: &str,
+    ) -> Result<Option<RemoteVault>, Box<dyn std::error::Error>> {
         let path = Self::vault_filename(account_name);
         self.runtime.block_on(async {
-            match self.operator.stat(&path).await {
-                Ok(meta) => {
-                    if meta.content_length() > MAX_DUMP_BYTES {
-                        return Err("Remote vault file exceeds the maximum allowed size.".into());
-                    }
-                }
+            let metadata = match self.operator.stat(&path).await {
+                Ok(metadata) => metadata,
                 Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
                 Err(err) => return Err(format!("Failed to stat remote vault: {err}").into()),
+            };
+            if metadata.content_length() > MAX_DUMP_BYTES {
+                return Err("Remote vault file exceeds the maximum allowed size.".into());
             }
+            let etag = metadata.etag().map(str::to_owned);
 
             match self.operator.read(&path).await {
-                Ok(buf) => Ok(Some(buf.to_vec())),
+                Ok(buf) => Ok(Some(RemoteVault {
+                    bytes: buf.to_vec(),
+                    etag,
+                })),
                 Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
                 Err(err) => Err(format!("Failed to download vault from cloud: {err}").into()),
             }
         })
     }
 
+    pub fn pull(&self, account_name: &str) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+        Ok(self.fetch(account_name)?.map(|vault| vault.bytes))
+    }
+
     pub fn push(&self, account_name: &str, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        self.push_with(account_name, bytes, Precondition::Any)
+    }
+
+    pub fn push_with(
+        &self,
+        account_name: &str,
+        bytes: &[u8],
+        precondition: Precondition<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let main_path = Self::vault_filename(account_name);
         let bak_path = Self::backup_filename(account_name);
         let tmp_path = Self::temp_filename(account_name);
@@ -83,7 +116,9 @@ impl CloudClient {
                 .await
                 .map_err(|err| format!("Failed to write temporary cloud object: {err}"))?;
 
-            let outcome = self.publish(&main_path, &bak_path, bytes).await;
+            let outcome = self
+                .publish(&main_path, &bak_path, bytes, precondition)
+                .await;
 
             if let Err(err) = self.operator.delete(&tmp_path).await {
                 eprintln!("Warning: could not remove temporary cloud object '{tmp_path}': {err}");
@@ -98,30 +133,124 @@ impl CloudClient {
         main_path: &str,
         bak_path: &str,
         bytes: &[u8],
+        precondition: Precondition<'_>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match self.operator.read(main_path).await {
-            Ok(existing) => {
-                self.operator
-                    .write(bak_path, existing)
-                    .await
-                    .map_err(|err| {
-                        format!("Failed to write backup of the cloud vault, upload aborted: {err}")
-                    })?;
+        let capability = self.operator.info().full_capability();
+        let if_match = match precondition {
+            Precondition::Unchanged(vault) if capability.write_with_if_match => {
+                vault.etag.as_deref()
             }
-            Err(err) if err.kind() == ErrorKind::NotFound => {}
-            Err(err) => {
-                return Err(format!(
-                    "Failed to read the current cloud vault, upload aborted: {err}"
-                )
-                .into());
-            }
+            _ => None,
+        };
+        let if_absent =
+            matches!(precondition, Precondition::Absent) && capability.write_with_if_not_exists;
+
+        if !self
+            .still_matches(main_path, precondition, if_match)
+            .await?
+        {
+            return Err(CHANGED_DURING_UPLOAD.into());
         }
 
+        self.backup_current(main_path, bak_path, precondition)
+            .await?;
+
+        let payload = bytes.to_vec();
+        let outcome = match (if_match, if_absent) {
+            (Some(etag), _) => {
+                self.operator
+                    .write_with(main_path, payload)
+                    .if_match(etag)
+                    .await
+            }
+            (None, true) => {
+                self.operator
+                    .write_with(main_path, payload)
+                    .if_not_exists(true)
+                    .await
+            }
+            (None, false) => self.operator.write(main_path, payload).await,
+        };
+
+        match outcome {
+            Ok(_) => Ok(()),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    ErrorKind::ConditionNotMatch | ErrorKind::AlreadyExists
+                ) =>
+            {
+                Err(CHANGED_DURING_UPLOAD.into())
+            }
+            Err(err) => Err(format!("Failed to publish vault to cloud: {err}").into()),
+        }
+    }
+
+    async fn backup_current(
+        &self,
+        main_path: &str,
+        bak_path: &str,
+        precondition: Precondition<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let current = match precondition {
+            Precondition::Absent => return Ok(()),
+            Precondition::Unchanged(vault) => vault.bytes.clone(),
+            Precondition::Any => match self.operator.read(main_path).await {
+                Ok(existing) => existing.to_vec(),
+                Err(err) if err.kind() == ErrorKind::NotFound => return Ok(()),
+                Err(err) => {
+                    return Err(format!(
+                        "Failed to read the current cloud vault, upload aborted: {err}"
+                    )
+                    .into());
+                }
+            },
+        };
+
         self.operator
-            .write(main_path, bytes.to_vec())
+            .write(bak_path, current)
             .await
-            .map_err(|err| format!("Failed to publish vault to cloud: {err}"))?;
+            .map_err(|err| {
+                format!("Failed to write backup of the cloud vault, upload aborted: {err}")
+            })?;
         Ok(())
+    }
+
+    async fn still_matches(
+        &self,
+        path: &str,
+        precondition: Precondition<'_>,
+        if_match: Option<&str>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        match precondition {
+            Precondition::Any => Ok(true),
+            Precondition::Absent => match self.operator.stat(path).await {
+                Ok(_) => Ok(false),
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(true),
+                Err(err) => Err(format!(
+                    "Failed to read the current cloud vault, upload aborted: {err}"
+                )
+                .into()),
+            },
+            Precondition::Unchanged(_) if if_match.is_some() => {
+                match self.operator.stat(path).await {
+                    Ok(metadata) => Ok(metadata.etag() == if_match),
+                    Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+                    Err(err) => Err(format!(
+                        "Failed to read the current cloud vault, upload aborted: {err}"
+                    )
+                    .into()),
+                }
+            }
+            Precondition::Unchanged(vault) => match self.operator.read(path).await {
+                Ok(current) => Ok(current.to_vec() == vault.bytes),
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+                Err(err) => Err(format!(
+                    "Failed to read the current cloud vault, upload aborted: {err}"
+                )
+                .into()),
+            },
+        }
     }
 
     fn format_filename(account_name: &str, extension: &str) -> String {

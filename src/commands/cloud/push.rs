@@ -1,7 +1,7 @@
 use super::resolve_account;
 use crate::{
     cloud::{
-        client::CloudClient,
+        client::{CloudClient, Precondition},
         config::{CloudConfig, SyncRecord},
         engine::SyncEngine,
     },
@@ -25,8 +25,14 @@ pub fn execute(
 
     let client = CloudClient::connect(&remote)?;
 
-    if !force && let Some(remote_bytes) = client.pull(&account_name)? {
-        let remote_hash = SyncEngine::digest(&remote_bytes);
+    let observed = if force {
+        None
+    } else {
+        client.fetch(&account_name)?
+    };
+
+    if let Some(vault) = &observed {
+        let remote_hash = SyncEngine::digest(&vault.bytes);
         if remote_hash == local_hash {
             println!(
                 "Account '{account_name}' on remote '{}' is already up to date.",
@@ -46,7 +52,12 @@ pub fn execute(
         }
     }
 
-    client.push(&account_name, &dump_bytes)?;
+    let precondition = match (force, observed.as_ref()) {
+        (true, _) => Precondition::Any,
+        (false, Some(vault)) => Precondition::Unchanged(vault),
+        (false, None) => Precondition::Absent,
+    };
+    client.push_with(&account_name, &dump_bytes, precondition)?;
 
     config.record_sync(
         &remote.name,

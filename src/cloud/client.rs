@@ -83,18 +83,45 @@ impl CloudClient {
                 .await
                 .map_err(|err| format!("Failed to write temporary cloud object: {err}"))?;
 
-            if let Ok(existing) = self.operator.read(&main_path).await {
-                let _ = self.operator.write(&bak_path, existing).await;
+            let outcome = self.publish(&main_path, &bak_path, bytes).await;
+
+            if let Err(err) = self.operator.delete(&tmp_path).await {
+                eprintln!("Warning: could not remove temporary cloud object '{tmp_path}': {err}");
             }
 
-            self.operator
-                .write(&main_path, bytes.to_vec())
-                .await
-                .map_err(|err| format!("Failed to publish vault to cloud: {err}"))?;
-
-            let _ = self.operator.delete(&tmp_path).await;
-            Ok(())
+            outcome
         })
+    }
+
+    async fn publish(
+        &self,
+        main_path: &str,
+        bak_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self.operator.read(main_path).await {
+            Ok(existing) => {
+                self.operator
+                    .write(bak_path, existing)
+                    .await
+                    .map_err(|err| {
+                        format!("Failed to write backup of the cloud vault, upload aborted: {err}")
+                    })?;
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(format!(
+                    "Failed to read the current cloud vault, upload aborted: {err}"
+                )
+                .into());
+            }
+        }
+
+        self.operator
+            .write(main_path, bytes.to_vec())
+            .await
+            .map_err(|err| format!("Failed to publish vault to cloud: {err}"))?;
+        Ok(())
     }
 
     fn format_filename(account_name: &str, extension: &str) -> String {

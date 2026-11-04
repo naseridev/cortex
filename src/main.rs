@@ -1,6 +1,6 @@
 use clap::Parser;
 use cortex::{
-    commands::{account, mcp, pass, vault},
+    commands::{account, cloud, mcp, pass, vault},
     core::password::PasswordCharset,
     ui::cli::{Cli, Commands},
 };
@@ -21,6 +21,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::Account { action } => account::run(action),
+        Commands::Cloud { action } => cloud::run(action),
         Commands::Mcp { action } => mcp::run(action),
         Commands::Vault { action } => vault::run(action),
         Commands::Pass {

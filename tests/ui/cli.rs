@@ -1,5 +1,7 @@
 use clap::{CommandFactory, Parser};
-use cortex::ui::cli::{AccountAction, Cli, Commands, McpAction, TagAction, VaultAction};
+use cortex::ui::cli::{
+    AccountAction, Cli, CloudAction, CloudProvider, Commands, McpAction, TagAction, VaultAction,
+};
 
 fn parse(input: &[&str]) -> Result<Commands, clap::Error> {
     let mut words = vec!["cortex"];
@@ -154,6 +156,100 @@ fn mcp_remove_parses_purge_flag() -> Result<(), Box<dyn std::error::Error>> {
         return Err("expected mcp remove".into());
     };
     assert!(purge_accounts);
+    Ok(())
+}
+
+#[test]
+fn cloud_providers_parse_all_supported_backends() -> Result<(), Box<dyn std::error::Error>> {
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::Nextcloud { url, username, .. },
+            },
+    } = parse(&[
+        "cloud",
+        "add",
+        "nextcloud",
+        "--url",
+        "https://cloud.example.com",
+        "-u",
+        "alice",
+    ])?
+    else {
+        return Err("expected cloud add nextcloud".into());
+    };
+    assert_eq!(url, "https://cloud.example.com");
+    assert_eq!(username.as_deref(), Some("alice"));
+
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::Gdrive { name, .. },
+            },
+    } = parse(&["cloud", "add", "gdrive"])?
+    else {
+        return Err("expected cloud add gdrive".into());
+    };
+    assert!(name.is_none());
+
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::Dropbox { name, .. },
+            },
+    } = parse(&["cloud", "add", "dropbox", "-n", "dbx"])?
+    else {
+        return Err("expected cloud add dropbox".into());
+    };
+    assert_eq!(name.as_deref(), Some("dbx"));
+
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::Onedrive { name, .. },
+            },
+    } = parse(&["cloud", "add", "onedrive"])?
+    else {
+        return Err("expected cloud add onedrive".into());
+    };
+    assert!(name.is_none());
+
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::S3 { bucket, region, .. },
+            },
+    } = parse(&["cloud", "add", "s3", "--bucket", "vaults"])?
+    else {
+        return Err("expected cloud add s3".into());
+    };
+    assert_eq!(bucket, "vaults");
+    assert_eq!(region, "us-east-1");
+
+    let Commands::Cloud {
+        action:
+            CloudAction::Add {
+                provider: CloudProvider::Webdav { url, .. },
+            },
+    } = parse(&["cloud", "add", "webdav", "--url", "https://dav.example.com"])?
+    else {
+        return Err("expected cloud add webdav".into());
+    };
+    assert_eq!(url, "https://dav.example.com");
+
+    Ok(())
+}
+
+#[test]
+fn cloud_sync_parses_optional_remote_and_account() -> Result<(), Box<dyn std::error::Error>> {
+    let Commands::Cloud {
+        action: CloudAction::Sync { remote, account },
+    } = parse(&["cloud", "sync", "-r", "nextcloud", "-a", "work"])?
+    else {
+        return Err("expected cloud sync".into());
+    };
+    assert_eq!(remote.as_deref(), Some("nextcloud"));
+    assert_eq!(account.as_deref(), Some("work"));
     Ok(())
 }
 

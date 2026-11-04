@@ -23,6 +23,12 @@ pub enum Commands {
         action: AccountAction,
     },
 
+    #[command(about = "Sync and back up encrypted vaults across cloud storage providers")]
+    Cloud {
+        #[command(subcommand)]
+        action: CloudAction,
+    },
+
     #[command(about = "Manage Model Context Protocol (MCP) server and agent permissions")]
     Mcp {
         #[command(subcommand)]
@@ -54,6 +60,273 @@ pub enum Commands {
         digits: bool,
         #[arg(short = 's', long, help = "Include special characters")]
         special: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CloudAction {
+    #[command(about = "Register a new cloud storage provider")]
+    Add {
+        #[command(subcommand)]
+        provider: CloudProvider,
+    },
+
+    #[command(about = "Synchronize an account vault between this machine and the cloud")]
+    Sync {
+        #[arg(short = 'r', long = "remote", help = "Cloud remote alias to use")]
+        remote: Option<String>,
+        #[arg(
+            short = 'a',
+            long = "account",
+            help = "Account name to sync (defaults to active)"
+        )]
+        account: Option<String>,
+    },
+
+    #[command(about = "Upload the local encrypted vault to the cloud")]
+    Push {
+        #[arg(short = 'r', long = "remote", help = "Cloud remote alias to use")]
+        remote: Option<String>,
+        #[arg(
+            short = 'a',
+            long = "account",
+            help = "Account name to push (defaults to active)"
+        )]
+        account: Option<String>,
+        #[arg(
+            short = 'f',
+            long = "force",
+            help = "Overwrite remote changes without merging"
+        )]
+        force: bool,
+    },
+
+    #[command(about = "Download an encrypted vault from the cloud to this machine")]
+    Pull {
+        #[arg(short = 'r', long = "remote", help = "Cloud remote alias to use")]
+        remote: Option<String>,
+        #[arg(
+            short = 'a',
+            long = "account",
+            help = "Account name to pull (defaults to active)"
+        )]
+        account: Option<String>,
+        #[arg(
+            short = 'o',
+            long = "overwrite",
+            help = "Replace existing local vault without confirmation prompt"
+        )]
+        overwrite: bool,
+    },
+
+    #[command(about = "List configured cloud remotes")]
+    List,
+
+    #[command(about = "Check synchronization status for an account")]
+    Status {
+        #[arg(short = 'r', long = "remote", help = "Cloud remote alias to check")]
+        remote: Option<String>,
+        #[arg(short = 'a', long = "account", help = "Account name to inspect")]
+        account: Option<String>,
+    },
+
+    #[command(about = "Set the default cloud remote")]
+    Default {
+        #[arg(help = "Name of the cloud remote to set as default")]
+        name: String,
+    },
+
+    #[command(about = "Remove a configured cloud remote and its credentials")]
+    Remove {
+        #[arg(help = "Name of the cloud remote to remove")]
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CloudProvider {
+    #[command(about = "Connect a Google Drive remote")]
+    Gdrive {
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: gdrive)")]
+        name: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
+        client_id: Option<String>,
+        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
+        client_secret: Option<String>,
+    },
+
+    #[command(about = "Connect a Dropbox remote")]
+    Dropbox {
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: dropbox)")]
+        name: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
+        client_id: Option<String>,
+        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
+        client_secret: Option<String>,
+    },
+
+    #[command(about = "Connect a Microsoft OneDrive remote")]
+    Onedrive {
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: onedrive)")]
+        name: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(long = "client-id", help = "Optional OAuth2 client ID")]
+        client_id: Option<String>,
+        #[arg(long = "client-secret", help = "Optional OAuth2 client secret")]
+        client_secret: Option<String>,
+    },
+
+    #[command(about = "Connect a Nextcloud remote")]
+    Nextcloud {
+        #[arg(long = "url", help = "Nextcloud server URL")]
+        url: String,
+        #[arg(short = 'u', long = "username", help = "Nextcloud username")]
+        username: Option<String>,
+        #[arg(long = "root", help = "Remote folder path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: nextcloud)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect an Amazon S3 or S3-compatible remote (R2, MinIO, Wasabi)")]
+    S3 {
+        #[arg(long = "bucket", help = "S3 bucket name")]
+        bucket: String,
+        #[arg(long = "region", default_value = "us-east-1", help = "S3 region")]
+        region: String,
+        #[arg(long = "endpoint", help = "Custom S3 endpoint URL")]
+        endpoint: Option<String>,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: s3)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a Google Cloud Storage remote")]
+    Gcs {
+        #[arg(long = "bucket", help = "GCS bucket name")]
+        bucket: String,
+        #[arg(long = "endpoint", help = "Optional custom GCS endpoint")]
+        endpoint: Option<String>,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: gcs)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect an Azure Blob Storage remote")]
+    Azblob {
+        #[arg(long = "container", help = "Azure Blob container name")]
+        container: String,
+        #[arg(long = "account", help = "Azure Storage account name")]
+        account: String,
+        #[arg(long = "endpoint", help = "Optional custom Azure Blob endpoint")]
+        endpoint: Option<String>,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: azblob)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a Backblaze B2 remote")]
+    B2 {
+        #[arg(long = "bucket", help = "Backblaze B2 bucket name")]
+        bucket: String,
+        #[arg(long = "bucket-id", help = "Backblaze B2 bucket ID")]
+        bucket_id: String,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: b2)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect an Alibaba Cloud OSS remote")]
+    Oss {
+        #[arg(long = "bucket", help = "Alibaba OSS bucket name")]
+        bucket: String,
+        #[arg(long = "endpoint", help = "Alibaba OSS endpoint URL")]
+        endpoint: String,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: oss)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a Tencent Cloud COS remote")]
+    Cos {
+        #[arg(long = "bucket", help = "Tencent COS bucket name")]
+        bucket: String,
+        #[arg(long = "endpoint", help = "Tencent COS endpoint URL")]
+        endpoint: String,
+        #[arg(long = "prefix", help = "Remote key prefix (default: /cortex)")]
+        prefix: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: cos)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a pCloud remote")]
+    Pcloud {
+        #[arg(
+            long = "endpoint",
+            default_value = "https://api.pcloud.com",
+            help = "pCloud API endpoint (use https://eapi.pcloud.com for EU)"
+        )]
+        endpoint: String,
+        #[arg(short = 'u', long = "username", help = "pCloud username or email")]
+        username: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: pcloud)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a Yandex Disk remote")]
+    Yandex {
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: yandex)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a Koofr remote")]
+    Koofr {
+        #[arg(
+            long = "endpoint",
+            default_value = "https://app.koofr.net",
+            help = "Koofr service endpoint URL"
+        )]
+        endpoint: String,
+        #[arg(short = 'e', long = "email", help = "Koofr account email")]
+        email: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: koofr)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a WebDAV remote")]
+    Webdav {
+        #[arg(long = "url", help = "WebDAV server base URL")]
+        url: String,
+        #[arg(short = 'u', long = "username", help = "WebDAV account username")]
+        username: Option<String>,
+        #[arg(long = "root", help = "Remote directory path (default: /cortex)")]
+        root: Option<String>,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: webdav)")]
+        name: Option<String>,
+    },
+
+    #[command(about = "Connect a local or mounted cloud directory (iCloud, Syncthing, NAS)")]
+    Local {
+        #[arg(long = "path", help = "Directory path for storing synced vaults")]
+        path: String,
+        #[arg(short = 'n', long = "name", help = "Remote alias (default: local)")]
+        name: Option<String>,
     },
 }
 

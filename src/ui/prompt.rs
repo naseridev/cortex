@@ -3,6 +3,7 @@ use std::io::{self, BufRead, Read, Write};
 use zeroize::{Zeroize, Zeroizing};
 
 const MAX_PASSWORD_BYTES: usize = 128;
+const MAX_TOKEN_BYTES: usize = 4_000;
 const DEFAULT_TEXT_LIMIT: usize = 128;
 
 pub struct UserPrompt;
@@ -12,6 +13,13 @@ impl UserPrompt {
         match Self::optional_password(prompt)? {
             Some(password) => Ok(password),
             None => Err("Empty password not allowed".into()),
+        }
+    }
+
+    pub fn token(prompt: &str) -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
+        match Self::optional_token(prompt)? {
+            Some(token) => Ok(token),
+            None => Err("Empty token not allowed".into()),
         }
     }
 
@@ -55,6 +63,27 @@ impl UserPrompt {
         }
 
         Ok(Some(secret))
+    }
+
+    pub fn optional_token(
+        prompt: &str,
+    ) -> Result<Option<Zeroizing<String>>, Box<dyn std::error::Error>> {
+        let raw = Zeroizing::new(rpassword::prompt_password(prompt)?);
+        let token = Zeroizing::new(raw.trim().to_string());
+
+        if token.is_empty() {
+            return Ok(None);
+        }
+
+        if token.len() > MAX_TOKEN_BYTES {
+            return Err(format!("Token too long (max {MAX_TOKEN_BYTES} bytes).").into());
+        }
+
+        if token.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err("Token contains invalid characters.".into());
+        }
+
+        Ok(Some(token))
     }
 
     pub fn text(prompt: &str) -> Result<String, Box<dyn std::error::Error>> {

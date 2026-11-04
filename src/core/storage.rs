@@ -283,6 +283,10 @@ impl Storage {
         Ok(entries)
     }
 
+    pub fn encode_dump(&self, crypto: &Crypto) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Snapshot::encode_bytes(self, crypto)
+    }
+
     pub fn create_dump(&self, crypto: &Crypto) -> Result<PathBuf, Box<dyn std::error::Error>> {
         let dump_dir = std::env::current_dir()
             .map_err(|error| format!("Failed to read the current directory: {error}"))?;

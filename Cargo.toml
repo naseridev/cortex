@@ -15,6 +15,22 @@ chacha20poly1305 = "0.11"
 clap = { version = "4.6", features = ["derive"] }
 csv = "1.4"
 getrandom = "0.4"
+opendal = { version = "0.52", features = [
+    "services-azblob",
+    "services-b2",
+    "services-cos",
+    "services-dropbox",
+    "services-fs",
+    "services-gcs",
+    "services-gdrive",
+    "services-koofr",
+    "services-onedrive",
+    "services-oss",
+    "services-pcloud",
+    "services-s3",
+    "services-webdav",
+    "services-yandex-disk",
+] }
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 rand = "0.10"
 redb = "4.4"
@@ -24,6 +40,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 subtle = "2.6"
 tempfile = "3.27"
+tokio = { version = "1", default-features = false, features = ["rt"] }
 zeroize = "1.9"
 ctrlc = "3.5"
 

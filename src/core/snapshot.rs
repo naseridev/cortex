@@ -28,6 +28,11 @@ impl Snapshot {
         self.user_count
     }
 
+    #[must_use]
+    pub fn entries(&self) -> &[(Vec<u8>, Vec<u8>)] {
+        &self.entries
+    }
+
     pub fn from_dump(file: &DumpFile, crypto: &Crypto) -> Result<Self, Box<dyn std::error::Error>> {
         let mut plain = crypto
             .open_dump(&file.nonce, &file.ciphertext)
@@ -74,15 +79,10 @@ impl Snapshot {
         })
     }
 
-    pub fn write_to_dir(
+    pub fn encode_bytes(
         storage: &Storage,
-        dump_dir: &Path,
         crypto: &Crypto,
-    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-        fs::create_dir_all(dump_dir).map_err(|error| {
-            format!("Failed to create directory {}: {error}", dump_dir.display())
-        })?;
-
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let salt = storage
             .get_salt()?
             .ok_or("Database salt not found. Database may be corrupted.")?;
@@ -100,6 +100,20 @@ impl Snapshot {
             nonce,
             ciphertext,
         })?;
+
+        Ok(bytes)
+    }
+
+    pub fn write_to_dir(
+        storage: &Storage,
+        dump_dir: &Path,
+        crypto: &Crypto,
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        fs::create_dir_all(dump_dir).map_err(|error| {
+            format!("Failed to create directory {}: {error}", dump_dir.display())
+        })?;
+
+        let bytes = Self::encode_bytes(storage, crypto)?;
 
         let path = dump_dir.join(format!(
             "{DUMP_PREFIX}{:020}{DUMP_SUFFIX}",

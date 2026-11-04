@@ -1,4 +1,4 @@
-use crate::core::storage::{RESERVED_PREFIX, TOMBSTONE_PREFIX};
+use crate::core::storage::{CLOCK_KEY, RESERVED_PREFIX, TOMBSTONE_PREFIX};
 use std::collections::BTreeMap;
 
 pub(crate) const MANIFEST_KEY: &str = "__manifest__";
@@ -29,7 +29,7 @@ impl Integrity {
 
     #[must_use]
     fn is_meta_key(key: &[u8]) -> bool {
-        Self::is_reserved_key(key) && !Self::is_tombstone_key(key)
+        Self::is_reserved_key(key) && !Self::is_tombstone_key(key) && key != CLOCK_KEY.as_bytes()
     }
 
     pub(crate) fn verify_manifest(

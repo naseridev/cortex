@@ -99,7 +99,7 @@ fn atomic_merge_replaces_the_tombstone_set() -> TestResult {
     storage.delete_password("alpha")?;
 
     let merged = vec![("beta".to_string(), 5u64)];
-    storage.atomic_merge(&[], &merged, &crypto, &Crypto::encode_salt(&[4u8; 32]))?;
+    storage.atomic_merge(&[], &merged, 0, &crypto, &Crypto::encode_salt(&[4u8; 32]))?;
 
     assert_eq!(storage.list_tombstones()?, merged);
     assert_eq!(storage.list_entries()?.len(), 0);

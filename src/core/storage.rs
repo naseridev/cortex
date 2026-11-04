@@ -23,6 +23,7 @@ pub(crate) const INIT_MARKER: &str = "__init__";
 pub(crate) const SALT_KEY: &str = "__salt__";
 pub(crate) const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
 pub(crate) const TOMBSTONE_PREFIX: &str = "__tombstone__/";
+pub(crate) const CLOCK_KEY: &str = "__clock__";
 
 const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
 const LEGACY_DB_DIR: &str = ".password-store";
@@ -93,23 +94,26 @@ impl Storage {
         crypto: &Crypto,
         salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.rewrite_vault(entries, None, crypto, salt)
+        self.rewrite_vault(entries, None, None, crypto, salt)
     }
 
     pub fn atomic_merge(
         &self,
         entries: &[(String, PasswordEntry)],
         tombstones: &[(String, u64)],
+        clock: u64,
         crypto: &Crypto,
         salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.rewrite_vault(entries, Some(tombstones), crypto, salt)
+        let merged_clock = self.clock()?.max(clock);
+        self.rewrite_vault(entries, Some(tombstones), Some(merged_clock), crypto, salt)
     }
 
     fn rewrite_vault(
         &self,
         entries: &[(String, PasswordEntry)],
         tombstones: Option<&[(String, u64)]>,
+        clock: Option<u64>,
         crypto: &Crypto,
         salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -133,6 +137,13 @@ impl Storage {
             changes.insert(
                 Self::tombstone_key(name),
                 Some(Self::encode_value(deleted_at)?),
+            );
+        }
+
+        if let Some(value) = clock {
+            changes.insert(
+                CLOCK_KEY.as_bytes().to_vec(),
+                Some(Self::encode_value(&value)?),
             );
         }
 
@@ -172,6 +183,32 @@ impl Storage {
         self.remove_raw(FAILED_ATTEMPTS_KEY.as_bytes())
     }
 
+    pub fn clock(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        match self.get_raw(CLOCK_KEY.as_bytes())? {
+            Some(data) => {
+                let stored: u64 = Self::decode_value(&data)?;
+                Ok(stored)
+            }
+            None => Self::clock_from_records(&self.records()?),
+        }
+    }
+
+    pub(crate) fn clock_from_records(
+        records: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<u64, Box<dyn std::error::Error>> {
+        let mut latest = 0u64;
+        for (key, value) in records {
+            if key.as_slice() == CLOCK_KEY.as_bytes() || Integrity::is_tombstone_key(key) {
+                let stamp: u64 = Self::decode_value(value)?;
+                latest = latest.max(stamp);
+            } else if !Integrity::is_reserved_key(key) {
+                let entry: PasswordEntry = Self::decode_value(value)?;
+                latest = latest.max(entry.timestamp);
+            }
+        }
+        Ok(latest)
+    }
+
     pub fn create_password(
         &self,
         name: &str,
@@ -183,7 +220,9 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit(&Self::live_changes(name, Self::encode_value(entry)?), &[])?;
+        let stamp = Self::hybrid_stamp(self.clock()?, entry.timestamp);
+        let stamped = Self::with_timestamp(entry, stamp);
+        self.commit(&Self::entry_changes(name, &stamped, stamp)?, &[])?;
         Ok(true)
     }
 
@@ -191,16 +230,23 @@ impl Storage {
         &self,
         entries: &[(String, PasswordEntry)],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut clock = self.clock()?;
         let mut changes = Changes::new();
         for (name, entry) in entries {
             Self::check_writable_name(name)?;
-            changes.extend(Self::live_changes(name, Self::encode_value(entry)?));
+            clock = Self::hybrid_stamp(clock, entry.timestamp);
+            let stamped = Self::with_timestamp(entry, clock);
+            changes.extend(Self::live_changes(name, Self::encode_value(&stamped)?));
         }
 
         if changes.is_empty() {
             return Ok(());
         }
 
+        changes.insert(
+            CLOCK_KEY.as_bytes().to_vec(),
+            Some(Self::encode_value(&clock)?),
+        );
         self.commit(&changes, &[])
     }
 
@@ -249,11 +295,13 @@ impl Storage {
             return Ok(false);
         }
 
+        let stamp = Self::hybrid_stamp(self.clock()?, Time::current_timestamp());
         let mut changes = Changes::new();
         changes.insert(name.as_bytes().to_vec(), None);
+        changes.insert(Self::tombstone_key(name), Some(Self::encode_value(&stamp)?));
         changes.insert(
-            Self::tombstone_key(name),
-            Some(Self::encode_value(&Time::current_timestamp())?),
+            CLOCK_KEY.as_bytes().to_vec(),
+            Some(Self::encode_value(&stamp)?),
         );
         self.commit(&changes, &[])?;
         Ok(true)
@@ -272,7 +320,9 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit(&Self::live_changes(name, Self::encode_value(entry)?), &[])?;
+        let stamp = Self::hybrid_stamp(self.clock()?, entry.timestamp);
+        let stamped = Self::with_timestamp(entry, stamp);
+        self.commit(&Self::entry_changes(name, &stamped, stamp)?, &[])?;
         Ok(true)
     }
 
@@ -470,6 +520,16 @@ impl Storage {
         Ok(())
     }
 
+    fn hybrid_stamp(clock: u64, wall: u64) -> u64 {
+        wall.max(clock.saturating_add(1))
+    }
+
+    fn with_timestamp(entry: &PasswordEntry, timestamp: u64) -> PasswordEntry {
+        let mut stamped = entry.clone();
+        stamped.timestamp = timestamp;
+        stamped
+    }
+
     fn tombstone_key(name: &str) -> Vec<u8> {
         format!("{TOMBSTONE_PREFIX}{name}").into_bytes()
     }
@@ -484,6 +544,19 @@ impl Storage {
         changes.insert(name.as_bytes().to_vec(), Some(value));
         changes.insert(Self::tombstone_key(name), None);
         changes
+    }
+
+    fn entry_changes(
+        name: &str,
+        entry: &PasswordEntry,
+        clock: u64,
+    ) -> Result<Changes, Box<dyn std::error::Error>> {
+        let mut changes = Self::live_changes(name, Self::encode_value(entry)?);
+        changes.insert(
+            CLOCK_KEY.as_bytes().to_vec(),
+            Some(Self::encode_value(&clock)?),
+        );
+        Ok(changes)
     }
 
     fn set_integrity(&self, key: Option<[u8; 32]>) {

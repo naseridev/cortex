@@ -10,6 +10,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use zeroize::Zeroizing;
 
+pub const CLOCK_SKEW_TOLERANCE_SECS: u64 = 300;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum SyncStatus {
     Identical,
@@ -40,6 +42,25 @@ pub struct MergeReport {
     pub updated_from_remote: usize,
     pub removed_from_remote: usize,
     pub kept_local: usize,
+    pub clock: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ClockSkew {
+    pub remote_ahead_secs: u64,
+    pub vault_ahead_secs: u64,
+}
+
+impl ClockSkew {
+    #[must_use]
+    pub fn remote_exceeds_tolerance(&self) -> bool {
+        self.remote_ahead_secs > CLOCK_SKEW_TOLERANCE_SECS
+    }
+
+    #[must_use]
+    pub fn vault_exceeds_tolerance(&self) -> bool {
+        self.vault_ahead_secs > CLOCK_SKEW_TOLERANCE_SECS
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -99,6 +120,14 @@ impl SyncEngine {
     #[must_use]
     pub fn digest(bytes: &[u8]) -> [u8; 32] {
         *blake3::hash(bytes).as_bytes()
+    }
+
+    #[must_use]
+    pub fn clock_skew(remote_clock: u64, local_clock: u64, now: u64) -> ClockSkew {
+        ClockSkew {
+            remote_ahead_secs: remote_clock.saturating_sub(now),
+            vault_ahead_secs: local_clock.saturating_sub(now),
+        }
     }
 
     #[must_use]
@@ -237,11 +266,22 @@ impl SyncEngine {
             updated_from_remote: 0,
             removed_from_remote: 0,
             kept_local: 0,
+            clock: 0,
         };
+        let mut clock = 0u64;
 
         for name in names {
             let local_slot = local_slots.get(name).copied();
             let remote_slot = remote_slots.get(name).copied();
+
+            if let Some(newest) = local_slot
+                .into_iter()
+                .chain(remote_slot)
+                .map(Slot::timestamp)
+                .max()
+            {
+                clock = clock.max(newest);
+            }
 
             let (winner, from_remote) = match (local_slot, remote_slot) {
                 (Some(previous), Some(incoming)) if remote_wins(previous, incoming) => {
@@ -277,6 +317,7 @@ impl SyncEngine {
             }
         }
 
+        report.clock = clock;
         Ok(report)
     }
 

@@ -3,7 +3,7 @@ use crate::{
     cloud::{
         client::CloudClient,
         config::{CloudConfig, CloudRemote, SyncRecord},
-        engine::{MergeReport, SyncEngine, SyncState, SyncStatus},
+        engine::{ClockSkew, MergeReport, SyncEngine, SyncState, SyncStatus},
     },
     core::{accounts::Accounts, crypto::Crypto, dump::Dump, storage::Storage, time::Time},
     modules::{gateway::Gateway, session::Session},
@@ -142,6 +142,7 @@ fn publish_merged(
     storage.atomic_merge(
         &report.entries,
         &report.tombstones,
+        report.clock,
         local_crypto,
         &local_salt,
     )?;
@@ -225,6 +226,21 @@ fn handle_remote_ahead_same_key(
     Ok(())
 }
 
+fn warn_clock_skew(skew: &ClockSkew, remote_name: &str) {
+    if skew.remote_exceeds_tolerance() {
+        eprintln!(
+            "Warning: remote '{remote_name}' holds timestamps {} seconds ahead of this device's clock. Edits made on a device with a wrong clock may win conflicts. Check the system clock on every device.",
+            skew.remote_ahead_secs
+        );
+    }
+    if skew.vault_exceeds_tolerance() {
+        eprintln!(
+            "Warning: this device's clock is {} seconds behind the newest timestamp in this vault. New changes are ordered after existing ones, but the system clock on this device should be checked.",
+            skew.vault_ahead_secs
+        );
+    }
+}
+
 fn reconcile_both(
     config: &mut CloudConfig,
     remote: &CloudRemote,
@@ -234,6 +250,7 @@ fn reconcile_both(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (storage, local_crypto) = Gateway::login_account(account_name)?;
     let local_state = SyncState::from_storage(&storage)?;
+    let local_clock = storage.clock()?;
     let local_bytes = storage.encode_dump(&local_crypto)?;
     let local_hash = SyncEngine::digest(&local_bytes);
     let remote_hash = SyncEngine::digest(remote_bytes);
@@ -261,6 +278,10 @@ fn reconcile_both(
     )?;
 
     let remote_state = SyncEngine::unpack_snapshot(&remote_snapshot)?;
+    let remote_clock = Storage::clock_from_records(remote_snapshot.entries())?;
+    let skew = SyncEngine::clock_skew(remote_clock, local_clock, Time::current_timestamp());
+    warn_clock_skew(&skew, &remote.name);
+
     let last_hash = remote
         .accounts
         .get(account_name)

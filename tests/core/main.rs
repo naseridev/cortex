@@ -1,4 +1,5 @@
 mod accounts;
+mod clock;
 #[path = "../common/mod.rs"]
 mod common;
 mod crypto;

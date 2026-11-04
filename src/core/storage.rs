@@ -8,6 +8,7 @@ use crate::core::{
     integrity::{Changes, Integrity, MANIFEST_KEY, Records},
     limits::MAX_ENTRIES,
     platform::Platform,
+    time::Time,
     types::PasswordEntry,
 };
 use redb::{Database, DatabaseError, ReadableDatabase, ReadableTable, TableDefinition};
@@ -21,6 +22,7 @@ pub const RESERVED_PREFIX: &str = "__";
 pub(crate) const INIT_MARKER: &str = "__init__";
 pub(crate) const SALT_KEY: &str = "__salt__";
 pub(crate) const FAILED_ATTEMPTS_KEY: &str = "__throttle__";
+pub(crate) const TOMBSTONE_PREFIX: &str = "__tombstone__/";
 
 const VAULT: TableDefinition<&[u8], &[u8]> = TableDefinition::new("vault");
 const LEGACY_DB_DIR: &str = ".password-store";
@@ -91,15 +93,47 @@ impl Storage {
         crypto: &Crypto,
         salt: &[u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.rewrite_vault(entries, None, crypto, salt)
+    }
+
+    pub fn atomic_merge(
+        &self,
+        entries: &[(String, PasswordEntry)],
+        tombstones: &[(String, u64)],
+        crypto: &Crypto,
+        salt: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.rewrite_vault(entries, Some(tombstones), crypto, salt)
+    }
+
+    fn rewrite_vault(
+        &self,
+        entries: &[(String, PasswordEntry)],
+        tombstones: Option<&[(String, u64)]>,
+        crypto: &Crypto,
+        salt: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut changes = Changes::new();
         for (key, _) in self.records()? {
-            if !Integrity::is_reserved_key(&key) {
+            let replaced = if Integrity::is_tombstone_key(&key) {
+                tombstones.is_some()
+            } else {
+                !Integrity::is_reserved_key(&key)
+            };
+            if replaced {
                 changes.insert(key, None);
             }
         }
 
         for (name, entry) in entries {
             changes.insert(name.as_bytes().to_vec(), Some(Self::encode_value(entry)?));
+        }
+
+        for (name, deleted_at) in tombstones.unwrap_or(&[]) {
+            changes.insert(
+                Self::tombstone_key(name),
+                Some(Self::encode_value(deleted_at)?),
+            );
         }
 
         self.set_integrity(Some(crypto.integrity_key()));
@@ -149,7 +183,7 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit_single(name, Some(Self::encode_value(entry)?))?;
+        self.commit(&Self::live_changes(name, Self::encode_value(entry)?), &[])?;
         Ok(true)
     }
 
@@ -160,7 +194,7 @@ impl Storage {
         let mut changes = Changes::new();
         for (name, entry) in entries {
             Self::check_writable_name(name)?;
-            changes.insert(name.as_bytes().to_vec(), Some(Self::encode_value(entry)?));
+            changes.extend(Self::live_changes(name, Self::encode_value(entry)?));
         }
 
         if changes.is_empty() {
@@ -190,6 +224,18 @@ impl Storage {
         Ok(entries)
     }
 
+    pub fn list_tombstones(&self) -> Result<Vec<(String, u64)>, Box<dyn std::error::Error>> {
+        let mut tombstones = Vec::new();
+        for (key, value) in self.records()? {
+            if let Some(name) = Self::tombstone_name(&key) {
+                let deleted_at: u64 = Self::decode_value(&value)?;
+                tombstones.push((name, deleted_at));
+            }
+        }
+        tombstones.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(tombstones)
+    }
+
     pub fn delete_password(&self, name: &str) -> Result<bool, Box<dyn std::error::Error>> {
         if Integrity::is_reserved_name(name) {
             return Err("Cannot delete system entries".into());
@@ -203,7 +249,13 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit_single(name, None)?;
+        let mut changes = Changes::new();
+        changes.insert(name.as_bytes().to_vec(), None);
+        changes.insert(
+            Self::tombstone_key(name),
+            Some(Self::encode_value(&Time::current_timestamp())?),
+        );
+        self.commit(&changes, &[])?;
         Ok(true)
     }
 
@@ -220,7 +272,7 @@ impl Storage {
             return Ok(false);
         }
 
-        self.commit_single(name, Some(Self::encode_value(entry)?))?;
+        self.commit(&Self::live_changes(name, Self::encode_value(entry)?), &[])?;
         Ok(true)
     }
 
@@ -418,6 +470,22 @@ impl Storage {
         Ok(())
     }
 
+    fn tombstone_key(name: &str) -> Vec<u8> {
+        format!("{TOMBSTONE_PREFIX}{name}").into_bytes()
+    }
+
+    pub(crate) fn tombstone_name(key: &[u8]) -> Option<String> {
+        let suffix = key.strip_prefix(TOMBSTONE_PREFIX.as_bytes())?;
+        String::from_utf8(suffix.to_vec()).ok()
+    }
+
+    fn live_changes(name: &str, value: Vec<u8>) -> Changes {
+        let mut changes = Changes::new();
+        changes.insert(name.as_bytes().to_vec(), Some(value));
+        changes.insert(Self::tombstone_key(name), None);
+        changes
+    }
+
     fn set_integrity(&self, key: Option<[u8; 32]>) {
         if let Some(mut previous) = self.integrity.replace(key) {
             previous.zeroize();
@@ -435,15 +503,6 @@ impl Storage {
             (INIT_MARKER, crypto.verification()),
             (SALT_KEY, salt.to_vec()),
         ]
-    }
-
-    fn commit_single(
-        &self,
-        name: &str,
-        value: Option<Vec<u8>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let changes = Changes::from([(name.as_bytes().to_vec(), value)]);
-        self.commit(&changes, &[])
     }
 
     fn commit(

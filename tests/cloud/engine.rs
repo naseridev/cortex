@@ -1,4 +1,4 @@
-use cortex::cloud::engine::{SyncEngine, SyncStatus};
+use cortex::cloud::engine::{SyncEngine, SyncState, SyncStatus};
 use cortex::core::{crypto::Crypto, types::PasswordEntry};
 
 use crate::common::TestResult;
@@ -19,31 +19,37 @@ fn merge_resolves_conflicts_by_newest_timestamp_across_keys() -> TestResult {
     let local_crypto = Crypto::from_key([1u8; 32]);
     let remote_crypto = Crypto::from_key([2u8; 32]);
 
-    let local = vec![
-        (
-            "github".to_string(),
-            sample_entry(&local_crypto, "github", "local_newer", 200)?,
-        ),
-        (
-            "mail".to_string(),
-            sample_entry(&local_crypto, "mail", "local_older", 100)?,
-        ),
-    ];
+    let local = SyncState {
+        entries: vec![
+            (
+                "github".to_string(),
+                sample_entry(&local_crypto, "github", "local_newer", 200)?,
+            ),
+            (
+                "mail".to_string(),
+                sample_entry(&local_crypto, "mail", "local_older", 100)?,
+            ),
+        ],
+        tombstones: Vec::new(),
+    };
 
-    let remote = vec![
-        (
-            "github".to_string(),
-            sample_entry(&remote_crypto, "github", "remote_older", 150)?,
-        ),
-        (
-            "mail".to_string(),
-            sample_entry(&remote_crypto, "mail", "remote_newer", 300)?,
-        ),
-        (
-            "aws".to_string(),
-            sample_entry(&remote_crypto, "aws", "remote_only", 250)?,
-        ),
-    ];
+    let remote = SyncState {
+        entries: vec![
+            (
+                "github".to_string(),
+                sample_entry(&remote_crypto, "github", "remote_older", 150)?,
+            ),
+            (
+                "mail".to_string(),
+                sample_entry(&remote_crypto, "mail", "remote_newer", 300)?,
+            ),
+            (
+                "aws".to_string(),
+                sample_entry(&remote_crypto, "aws", "remote_only", 250)?,
+            ),
+        ],
+        tombstones: Vec::new(),
+    };
 
     let report = SyncEngine::merge(&local, &local_crypto, &remote, &remote_crypto, false)?;
     assert_eq!(report.added_from_remote, 1);
@@ -71,8 +77,14 @@ fn evaluate_status_detects_fast_forward_and_divergence() -> TestResult {
     let e2 = sample_entry(&crypto, "alpha", "pass5678", 200)?;
     let e3 = sample_entry(&crypto, "beta", "pass9999", 250)?;
 
-    let local = vec![("alpha".to_string(), e2)];
-    let remote = vec![("alpha".to_string(), e1), ("beta".to_string(), e3)];
+    let local = SyncState {
+        entries: vec![("alpha".to_string(), e2)],
+        tombstones: Vec::new(),
+    };
+    let remote = SyncState {
+        entries: vec![("alpha".to_string(), e1), ("beta".to_string(), e3)],
+        tombstones: Vec::new(),
+    };
 
     assert_eq!(
         SyncEngine::evaluate_status(&local, &remote, None, [1u8; 32], [2u8; 32]),

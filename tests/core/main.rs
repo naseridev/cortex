@@ -5,5 +5,6 @@ mod crypto;
 mod password;
 mod storage;
 mod tags;
+mod tombstones;
 mod types;
 mod validation;

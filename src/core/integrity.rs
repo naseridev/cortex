@@ -1,4 +1,4 @@
-use crate::core::storage::RESERVED_PREFIX;
+use crate::core::storage::{RESERVED_PREFIX, TOMBSTONE_PREFIX};
 use std::collections::BTreeMap;
 
 pub(crate) const MANIFEST_KEY: &str = "__manifest__";
@@ -20,6 +20,16 @@ impl Integrity {
     #[must_use]
     pub(crate) fn is_reserved_key(key: &[u8]) -> bool {
         key.starts_with(RESERVED_PREFIX.as_bytes())
+    }
+
+    #[must_use]
+    pub(crate) fn is_tombstone_key(key: &[u8]) -> bool {
+        key.starts_with(TOMBSTONE_PREFIX.as_bytes())
+    }
+
+    #[must_use]
+    fn is_meta_key(key: &[u8]) -> bool {
+        Self::is_reserved_key(key) && !Self::is_tombstone_key(key)
     }
 
     pub(crate) fn verify_manifest(
@@ -59,7 +69,7 @@ impl Integrity {
         let mut pending = changes.iter().peekable();
 
         for (db_key, db_value) in records {
-            if Self::is_reserved_key(db_key) {
+            if Self::is_meta_key(db_key) {
                 continue;
             }
 
@@ -88,7 +98,7 @@ impl Integrity {
     pub(crate) fn snapshot_digest(key: &[u8; 32], entries: &[(Vec<u8>, Vec<u8>)]) -> blake3::Hash {
         let mut records: Vec<&(Vec<u8>, Vec<u8>)> = entries
             .iter()
-            .filter(|(name, _)| !Self::is_reserved_key(name))
+            .filter(|(name, _)| !Self::is_meta_key(name))
             .collect();
 
         records.sort_by(|left, right| left.0.cmp(&right.0));

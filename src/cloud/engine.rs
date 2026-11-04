@@ -6,7 +6,8 @@ use crate::core::{
     storage::Storage,
     types::{PasswordEntry, SecretText},
 };
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 use zeroize::Zeroizing;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,11 +18,79 @@ pub enum SyncStatus {
     Diverged,
 }
 
+#[derive(Default)]
+pub struct SyncState {
+    pub entries: Vec<(String, PasswordEntry)>,
+    pub tombstones: Vec<(String, u64)>,
+}
+
+impl SyncState {
+    pub fn from_storage(storage: &Storage) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self {
+            entries: storage.list_entries()?,
+            tombstones: storage.list_tombstones()?,
+        })
+    }
+}
+
 pub struct MergeReport {
     pub entries: Vec<(String, PasswordEntry)>,
+    pub tombstones: Vec<(String, u64)>,
     pub added_from_remote: usize,
     pub updated_from_remote: usize,
+    pub removed_from_remote: usize,
     pub kept_local: usize,
+}
+
+#[derive(Clone, Copy)]
+enum Slot<'a> {
+    Live(&'a PasswordEntry),
+    Deleted(u64),
+}
+
+impl Slot<'_> {
+    fn timestamp(self) -> u64 {
+        match self {
+            Self::Live(entry) => entry.timestamp,
+            Self::Deleted(deleted_at) => deleted_at,
+        }
+    }
+
+    fn is_deleted(self) -> bool {
+        matches!(self, Self::Deleted(_))
+    }
+}
+
+fn slots(state: &SyncState) -> BTreeMap<&str, Slot<'_>> {
+    let mut map: BTreeMap<&str, Slot<'_>> = state
+        .entries
+        .iter()
+        .map(|(name, entry)| (name.as_str(), Slot::Live(entry)))
+        .collect();
+
+    for (name, deleted_at) in &state.tombstones {
+        let slot = match map.get(name.as_str()).copied() {
+            Some(Slot::Live(entry)) if entry.timestamp > *deleted_at => Slot::Live(entry),
+            _ => Slot::Deleted(*deleted_at),
+        };
+        map.insert(name.as_str(), slot);
+    }
+
+    map
+}
+
+fn remote_wins(local: Slot<'_>, remote: Slot<'_>) -> bool {
+    match remote.timestamp().cmp(&local.timestamp()) {
+        Ordering::Greater => true,
+        Ordering::Less => false,
+        Ordering::Equal => remote.is_deleted() && !local.is_deleted(),
+    }
+}
+
+fn content_differs(local: &PasswordEntry, remote: &PasswordEntry) -> bool {
+    local.encrypted_password != remote.encrypted_password
+        || local.encrypted_description != remote.encrypted_description
+        || local.encrypted_tags != remote.encrypted_tags
 }
 
 pub struct SyncEngine;
@@ -34,8 +103,8 @@ impl SyncEngine {
 
     #[must_use]
     pub fn evaluate_status(
-        local_entries: &[(String, PasswordEntry)],
-        remote_entries: &[(String, PasswordEntry)],
+        local: &SyncState,
+        remote: &SyncState,
         last_synced_hash: Option<[u8; 32]>,
         local_hash: [u8; 32],
         remote_hash: [u8; 32],
@@ -53,38 +122,46 @@ impl SyncEngine {
             }
         }
 
-        let local_map: BTreeMap<&str, &PasswordEntry> =
-            local_entries.iter().map(|(k, v)| (k.as_str(), v)).collect();
-        let remote_map: BTreeMap<&str, &PasswordEntry> = remote_entries
-            .iter()
-            .map(|(k, v)| (k.as_str(), v))
+        let local_slots = slots(local);
+        let remote_slots = slots(remote);
+        let names: BTreeSet<&str> = local_slots
+            .keys()
+            .chain(remote_slots.keys())
+            .copied()
             .collect();
 
         let mut local_newer = false;
         let mut remote_newer = false;
 
-        for (name, local_entry) in &local_map {
-            match remote_map.get(name) {
-                Some(remote_entry) => {
-                    if local_entry.timestamp > remote_entry.timestamp {
-                        local_newer = true;
-                    } else if remote_entry.timestamp > local_entry.timestamp {
-                        remote_newer = true;
-                    } else if local_entry.encrypted_password != remote_entry.encrypted_password
-                        || local_entry.encrypted_description != remote_entry.encrypted_description
-                        || local_entry.encrypted_tags != remote_entry.encrypted_tags
-                    {
-                        local_newer = true;
-                        remote_newer = true;
+        for name in names {
+            match (
+                local_slots.get(name).copied(),
+                remote_slots.get(name).copied(),
+            ) {
+                (Some(_), None) => local_newer = true,
+                (None, Some(_)) => remote_newer = true,
+                (None, None) => {}
+                (Some(local_slot), Some(remote_slot)) => {
+                    match local_slot.timestamp().cmp(&remote_slot.timestamp()) {
+                        Ordering::Greater => local_newer = true,
+                        Ordering::Less => remote_newer = true,
+                        Ordering::Equal => match (local_slot, remote_slot) {
+                            (Slot::Live(local_entry), Slot::Live(remote_entry)) => {
+                                if content_differs(local_entry, remote_entry) {
+                                    local_newer = true;
+                                    remote_newer = true;
+                                }
+                            }
+                            _ => {
+                                if local_slot.is_deleted() && !remote_slot.is_deleted() {
+                                    local_newer = true;
+                                } else if remote_slot.is_deleted() && !local_slot.is_deleted() {
+                                    remote_newer = true;
+                                }
+                            }
+                        },
                     }
                 }
-                None => local_newer = true,
-            }
-        }
-
-        for name in remote_map.keys() {
-            if !local_map.contains_key(name) {
-                remote_newer = true;
             }
         }
 
@@ -96,21 +173,27 @@ impl SyncEngine {
         }
     }
 
-    pub fn unpack_snapshot(
-        snapshot: &Snapshot,
-    ) -> Result<Vec<(String, PasswordEntry)>, Box<dyn std::error::Error>> {
-        let mut entries = Vec::new();
+    pub fn unpack_snapshot(snapshot: &Snapshot) -> Result<SyncState, Box<dyn std::error::Error>> {
+        let mut state = SyncState::default();
         for (key, value) in snapshot.entries() {
+            if let Some(name) = Storage::tombstone_name(key) {
+                let deleted_at: u64 = Storage::decode_value(value)?;
+                state.tombstones.push((name, deleted_at));
+                continue;
+            }
+
             if Integrity::is_reserved_key(key) {
                 continue;
             }
+
             let name = String::from_utf8(key.clone())
                 .map_err(|_| "Remote snapshot contains invalid UTF-8 entry name")?;
             let entry: PasswordEntry = Storage::decode_value(value)?;
-            entries.push((name, entry));
+            state.entries.push((name, entry));
         }
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(entries)
+        state.entries.sort_by(|a, b| a.0.cmp(&b.0));
+        state.tombstones.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(state)
     }
 
     pub fn open_remote_snapshot(
@@ -133,58 +216,68 @@ impl SyncEngine {
     }
 
     pub fn merge(
-        local_entries: &[(String, PasswordEntry)],
+        local: &SyncState,
         local_crypto: &Crypto,
-        remote_entries: &[(String, PasswordEntry)],
+        remote: &SyncState,
         remote_crypto: &Crypto,
         same_key: bool,
     ) -> Result<MergeReport, Box<dyn std::error::Error>> {
-        let mut merged_map: BTreeMap<String, PasswordEntry> =
-            local_entries.iter().cloned().collect();
+        let local_slots = slots(local);
+        let remote_slots = slots(remote);
+        let names: BTreeSet<&str> = local_slots
+            .keys()
+            .chain(remote_slots.keys())
+            .copied()
+            .collect();
 
-        let mut added_from_remote = 0usize;
-        let mut updated_from_remote = 0usize;
-        let mut kept_local = 0usize;
+        let mut report = MergeReport {
+            entries: Vec::new(),
+            tombstones: Vec::new(),
+            added_from_remote: 0,
+            updated_from_remote: 0,
+            removed_from_remote: 0,
+            kept_local: 0,
+        };
 
-        for (name, remote_entry) in remote_entries {
-            match merged_map.get(name) {
-                None => {
-                    let converted = Self::rebind_entry(
-                        name,
-                        remote_entry,
-                        remote_crypto,
-                        local_crypto,
-                        same_key,
-                    )?;
-                    merged_map.insert(name.clone(), converted);
-                    added_from_remote += 1;
+        for name in names {
+            let local_slot = local_slots.get(name).copied();
+            let remote_slot = remote_slots.get(name).copied();
+
+            let (winner, from_remote) = match (local_slot, remote_slot) {
+                (Some(previous), Some(incoming)) if remote_wins(previous, incoming) => {
+                    (incoming, true)
                 }
-                Some(local_entry) => {
-                    if remote_entry.timestamp > local_entry.timestamp {
-                        let converted = Self::rebind_entry(
-                            name,
-                            remote_entry,
-                            remote_crypto,
-                            local_crypto,
-                            same_key,
-                        )?;
-                        merged_map.insert(name.clone(), converted);
-                        updated_from_remote += 1;
+                (None, Some(incoming)) => (incoming, true),
+                (Some(previous), _) => (previous, false),
+                (None, None) => continue,
+            };
+
+            match (from_remote, local_slot, winner) {
+                (true, None, Slot::Live(_)) => report.added_from_remote += 1,
+                (true, Some(_), Slot::Live(_)) => report.updated_from_remote += 1,
+                (true, Some(previous), Slot::Deleted(_)) if !previous.is_deleted() => {
+                    report.removed_from_remote += 1;
+                }
+                (false, _, _) if remote_slot.is_some() => report.kept_local += 1,
+                _ => {}
+            }
+
+            match winner {
+                Slot::Live(entry) => {
+                    let kept = if from_remote {
+                        Self::rebind_entry(name, entry, remote_crypto, local_crypto, same_key)?
                     } else {
-                        kept_local += 1;
-                    }
+                        entry.clone()
+                    };
+                    report.entries.push((name.to_string(), kept));
+                }
+                Slot::Deleted(deleted_at) => {
+                    report.tombstones.push((name.to_string(), deleted_at));
                 }
             }
         }
 
-        let entries: Vec<(String, PasswordEntry)> = merged_map.into_iter().collect();
-
-        Ok(MergeReport {
-            entries,
-            added_from_remote,
-            updated_from_remote,
-            kept_local,
-        })
+        Ok(report)
     }
 
     fn rebind_entry(

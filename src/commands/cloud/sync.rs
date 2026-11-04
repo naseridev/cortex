@@ -3,7 +3,7 @@ use crate::{
     cloud::{
         client::CloudClient,
         config::{CloudConfig, CloudRemote, SyncRecord},
-        engine::{MergeReport, SyncEngine, SyncStatus},
+        engine::{MergeReport, SyncEngine, SyncState, SyncStatus},
     },
     core::{accounts::Accounts, crypto::Crypto, dump::Dump, storage::Storage, time::Time},
     modules::{gateway::Gateway, session::Session},
@@ -139,7 +139,12 @@ fn publish_merged(
     let local_salt = storage
         .get_salt()?
         .ok_or("Database salt not found. Database may be corrupted.")?;
-    storage.atomic_reset(&report.entries, local_crypto, &local_salt)?;
+    storage.atomic_merge(
+        &report.entries,
+        &report.tombstones,
+        local_crypto,
+        &local_salt,
+    )?;
     storage.verify_integrity()?;
 
     let merged_bytes = storage.encode_dump(local_crypto)?;
@@ -159,10 +164,11 @@ fn publish_merged(
     )?;
 
     println!(
-        "Synchronized '{account_name}' with '{}': {} added, {} updated, {} kept (total: {}).",
+        "Synchronized '{account_name}' with '{}': {} added, {} updated, {} removed, {} kept (total: {}).",
         remote.name,
         report.added_from_remote,
         report.updated_from_remote,
+        report.removed_from_remote,
         report.kept_local,
         report.entries.len()
     );
@@ -227,7 +233,7 @@ fn reconcile_both(
     remote_bytes: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (storage, local_crypto) = Gateway::login_account(account_name)?;
-    let local_entries = storage.list_entries()?;
+    let local_state = SyncState::from_storage(&storage)?;
     let local_bytes = storage.encode_dump(&local_crypto)?;
     let local_hash = SyncEngine::digest(&local_bytes);
     let remote_hash = SyncEngine::digest(remote_bytes);
@@ -238,7 +244,7 @@ fn reconcile_both(
             remote,
             account_name,
             local_hash,
-            local_entries.len(),
+            local_state.entries.len(),
         )?;
         handle_identical(remote, account_name);
         return Ok(());
@@ -254,7 +260,7 @@ fn reconcile_both(
         },
     )?;
 
-    let remote_entries = SyncEngine::unpack_snapshot(&remote_snapshot)?;
+    let remote_state = SyncEngine::unpack_snapshot(&remote_snapshot)?;
     let last_hash = remote
         .accounts
         .get(account_name)
@@ -262,8 +268,8 @@ fn reconcile_both(
         .filter(|h| *h != [0u8; 32]);
 
     let status = SyncEngine::evaluate_status(
-        &local_entries,
-        &remote_entries,
+        &local_state,
+        &remote_state,
         last_hash,
         local_hash,
         remote_hash,
@@ -278,7 +284,7 @@ fn reconcile_both(
             account_name,
             &local_bytes,
             local_hash,
-            local_entries.len(),
+            local_state.entries.len(),
         )?,
         SyncStatus::RemoteAhead if same_key => handle_remote_ahead_same_key(
             config,
@@ -287,18 +293,19 @@ fn reconcile_both(
             &storage,
             &remote_snapshot,
             remote_hash,
-            remote_entries.len(),
+            remote_state.entries.len(),
         )?,
         SyncStatus::RemoteAhead | SyncStatus::Diverged => {
+            let empty = SyncState::default();
             let base_local = if status == SyncStatus::RemoteAhead {
-                &[][..]
+                &empty
             } else {
-                &local_entries[..]
+                &local_state
             };
             let report = SyncEngine::merge(
                 base_local,
                 &local_crypto,
-                &remote_entries,
+                &remote_state,
                 &remote_crypto,
                 same_key,
             )?;

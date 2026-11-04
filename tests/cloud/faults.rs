@@ -6,7 +6,7 @@ use opendal::raw::{
 use opendal::{ErrorKind, Operator, services};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tempfile::TempDir;
 
 use crate::common::{TestResult, failure};
@@ -31,7 +31,7 @@ struct Hook {
     path: String,
     nth: usize,
     seen: usize,
-    action: Box<dyn FnOnce() + Send>,
+    action: Box<dyn FnOnce() -> std::io::Result<()> + Send>,
 }
 
 pub struct Faults {
@@ -48,6 +48,10 @@ impl fmt::Debug for Faults {
     }
 }
 
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 impl Faults {
     fn new(root: &Path, conditional: bool) -> Self {
         Self {
@@ -60,15 +64,21 @@ impl Faults {
     }
 
     pub fn fail_next(&self, op: Op, path: &str, times: usize) {
-        self.failures.lock().unwrap().push(Failure {
+        locked(&self.failures).push(Failure {
             op,
             path: path.to_string(),
             remaining: times,
         });
     }
 
-    pub fn on_nth(&self, op: Op, path: &str, nth: usize, action: impl FnOnce() + Send + 'static) {
-        self.hooks.lock().unwrap().push(Hook {
+    pub fn on_nth(
+        &self,
+        op: Op,
+        path: &str,
+        nth: usize,
+        action: impl FnOnce() -> std::io::Result<()> + Send + 'static,
+    ) {
+        locked(&self.hooks).push(Hook {
             op,
             path: path.to_string(),
             nth,
@@ -78,13 +88,13 @@ impl Faults {
     }
 
     pub fn if_match_log(&self) -> Vec<Option<String>> {
-        self.if_match_log.lock().unwrap().clone()
+        locked(&self.if_match_log).clone()
     }
 
-    fn before(&self, op: Op, path: &str) -> opendal::Result<()> {
+    fn before(&self, op: Op, path: &str) -> Result<(), Box<opendal::Error>> {
         let mut due = Vec::new();
         {
-            let mut hooks = self.hooks.lock().unwrap();
+            let mut hooks = locked(&self.hooks);
             let mut kept = Vec::new();
             for mut hook in hooks.drain(..) {
                 if hook.op == op && hook.path == path {
@@ -99,10 +109,15 @@ impl Faults {
             *hooks = kept;
         }
         for action in due {
-            action();
+            action().map_err(|error| {
+                Box::new(opendal::Error::new(
+                    ErrorKind::Unexpected,
+                    format!("hook failed: {error}"),
+                ))
+            })?;
         }
 
-        let mut failures = self.failures.lock().unwrap();
+        let mut failures = locked(&self.failures);
         if let Some(index) = failures
             .iter()
             .position(|failure| failure.op == op && failure.path == path)
@@ -111,22 +126,22 @@ impl Faults {
             if failures[index].remaining == 0 {
                 failures.remove(index);
             }
-            return Err(opendal::Error::new(
+            return Err(Box::new(opendal::Error::new(
                 ErrorKind::Unexpected,
                 "injected failure",
-            ));
+            )));
         }
         Ok(())
     }
 
-    fn etag(&self, path: &str) -> opendal::Result<Option<String>> {
+    fn etag(&self, path: &str) -> Result<Option<String>, Box<opendal::Error>> {
         match std::fs::read(self.root.join(path)) {
             Ok(bytes) => Ok(Some(format!("\"{}\"", blake3::hash(&bytes).to_hex()))),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(opendal::Error::new(
+            Err(error) => Err(Box::new(opendal::Error::new(
                 ErrorKind::Unexpected,
                 format!("etag read failed: {error}"),
-            )),
+            ))),
         }
     }
 }
@@ -177,19 +192,17 @@ impl<A: Access> LayeredAccess for FaultAccess<A> {
     }
 
     async fn read(&self, path: &str, args: OpRead) -> opendal::Result<(RpRead, Self::Reader)> {
-        self.faults.before(Op::Read, path)?;
+        self.faults.before(Op::Read, path).map_err(|error| *error)?;
         self.inner.read(path, args).await
     }
 
     async fn write(&self, path: &str, args: OpWrite) -> opendal::Result<(RpWrite, Self::Writer)> {
-        self.faults.before(Op::Write, path)?;
         self.faults
-            .if_match_log
-            .lock()
-            .unwrap()
-            .push(args.if_match().map(str::to_owned));
+            .before(Op::Write, path)
+            .map_err(|error| *error)?;
+        locked(&self.faults.if_match_log).push(args.if_match().map(str::to_owned));
         if self.faults.conditional {
-            let current = self.faults.etag(path)?;
+            let current = self.faults.etag(path).map_err(|error| *error)?;
             let if_match_failed = match args.if_match() {
                 Some(expected) => current.as_deref() != Some(expected),
                 None => false,
@@ -206,12 +219,12 @@ impl<A: Access> LayeredAccess for FaultAccess<A> {
     }
 
     async fn stat(&self, path: &str, args: OpStat) -> opendal::Result<RpStat> {
-        self.faults.before(Op::Stat, path)?;
+        self.faults.before(Op::Stat, path).map_err(|error| *error)?;
         let reply = self.inner.stat(path, args).await?;
         if !self.faults.conditional {
             return Ok(reply);
         }
-        let etag = self.faults.etag(path)?;
+        let etag = self.faults.etag(path).map_err(|error| *error)?;
         Ok(reply.map_metadata(|meta| match etag {
             Some(tag) => meta.with_etag(tag),
             None => meta,
@@ -349,7 +362,7 @@ fn vault_replaced_after_precheck_is_rejected_by_the_conditional_write() -> TestR
         Op::Write,
         &CloudClient::vault_filename("work"),
         1,
-        move || std::fs::write(&vault, b"other_device").expect("concurrent write"),
+        move || std::fs::write(&vault, b"other_device"),
     );
 
     let error = failure(
@@ -374,7 +387,7 @@ fn vault_created_before_the_check_is_rejected_for_a_new_vault_in_both_modes() ->
             Op::Stat,
             &CloudClient::vault_filename("work"),
             1,
-            move || std::fs::write(&vault, b"other_device").expect("concurrent write"),
+            move || std::fs::write(&vault, b"other_device"),
         );
 
         let error = failure(h.client.push_with("work", b"first", Precondition::Absent))?;
@@ -399,7 +412,7 @@ fn vault_created_after_the_check_is_rejected_by_if_not_exists() -> TestResult {
         Op::Write,
         &CloudClient::vault_filename("work"),
         1,
-        move || std::fs::write(&vault, b"other_device").expect("concurrent write"),
+        move || std::fs::write(&vault, b"other_device"),
     );
 
     let error = failure(h.client.push_with("work", b"first", Precondition::Absent))?;

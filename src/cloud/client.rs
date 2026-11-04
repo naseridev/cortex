@@ -12,6 +12,7 @@ const VAULT_EXT: &str = ".cortex";
 const BACKUP_EXT: &str = ".cortex.bak";
 const TEMP_EXT: &str = ".cortex.tmp";
 const CHANGED_DURING_UPLOAD: &str = "Remote vault changed during the upload and was left untouched. Run 'cortex cloud sync' to merge the changes, then push again.";
+const REPLACED_AFTER_UPLOAD: &str = "Remote vault changed during the upload: it was replaced after this device wrote it. Run 'cortex cloud sync' to merge the changes, then push again.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteVault {
@@ -176,16 +177,34 @@ impl CloudClient {
         };
 
         match outcome {
-            Ok(_) => Ok(()),
+            Ok(_) => {}
             Err(err)
                 if matches!(
                     err.kind(),
                     ErrorKind::ConditionNotMatch | ErrorKind::AlreadyExists
                 ) =>
             {
-                Err(CHANGED_DURING_UPLOAD.into())
+                return Err(CHANGED_DURING_UPLOAD.into());
             }
-            Err(err) => Err(format!("Failed to publish vault to cloud: {err}").into()),
+            Err(err) => return Err(format!("Failed to publish vault to cloud: {err}").into()),
+        }
+
+        if if_match.is_none() && !if_absent {
+            self.verify_published(main_path, bytes).await?;
+        }
+        Ok(())
+    }
+
+    async fn verify_published(
+        &self,
+        main_path: &str,
+        bytes: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self.operator.read(main_path).await {
+            Ok(current) if current.to_vec() == bytes => Ok(()),
+            Ok(_) => Err(REPLACED_AFTER_UPLOAD.into()),
+            Err(err) if err.kind() == ErrorKind::NotFound => Err(REPLACED_AFTER_UPLOAD.into()),
+            Err(err) => Err(format!("Failed to verify the uploaded cloud vault: {err}").into()),
         }
     }
 

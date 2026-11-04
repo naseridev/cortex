@@ -650,3 +650,31 @@ fn two_devices_interleaving_never_overwrite_each_other_in_both_modes() -> TestRe
     }
     Ok(())
 }
+
+#[test]
+fn unconditional_upload_replaced_after_it_is_written_is_reported() -> TestResult {
+    let h = Harness::new(false)?;
+    h.client.push("work", b"first")?;
+    let observed = h.client.fetch("work")?.ok_or("vault should exist")?;
+
+    let vault = h.vault_path("work");
+    h.faults.on_nth(
+        Op::Read,
+        &CloudClient::vault_filename("work"),
+        2,
+        move || std::fs::write(&vault, b"other_device"),
+    );
+
+    let error = failure(
+        h.client
+            .push_with("work", b"merged", Precondition::Unchanged(&observed)),
+    )?;
+    assert!(error.to_string().contains(CONFLICT));
+    assert_eq!(
+        h.client.pull("work")?.as_deref(),
+        Some(&b"other_device"[..])
+    );
+    assert_eq!(std::fs::read(h.backup_path("work"))?, b"first");
+    assert!(!h.temp_path("work").exists());
+    Ok(())
+}

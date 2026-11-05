@@ -1,6 +1,6 @@
 use crate::{
-    core::{types::SecretText, validation::Validation},
-    modules::{clipboard::PasswordClipboard, gateway::Gateway},
+    core::{gateway::Gateway, types::SecretText, validation::Validation},
+    ui::clipboard::PasswordClipboard,
 };
 use zeroize::Zeroizing;
 

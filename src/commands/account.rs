@@ -9,7 +9,13 @@ pub mod reset;
 pub mod restore;
 pub mod switch;
 
-use crate::ui::{cli::AccountAction, prompt::UserPrompt};
+use crate::{
+    core::{
+        accounts::{Accounts, NO_ACCOUNTS},
+        validation::Validation,
+    },
+    ui::{cli::AccountAction, prompt::UserPrompt},
+};
 
 pub fn run(action: AccountAction) -> Result<(), Box<dyn std::error::Error>> {
     match action {
@@ -34,4 +40,23 @@ pub fn resolve_name(
         Some(name) => Ok(name.trim().to_string()),
         None => UserPrompt::text(prompt),
     }
+}
+
+pub fn resolve_existing(
+    provided: Option<String>,
+    prompt: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let (accounts, _) = Accounts::list()?;
+    if accounts.is_empty() {
+        return Err(NO_ACCOUNTS.into());
+    }
+
+    let account_name = resolve_name(provided, prompt)?;
+    Validation::check_account_name(&account_name)?;
+
+    if !accounts.contains(&account_name) || !Accounts::db_file_exists(&account_name)? {
+        return Err(format!("Account '{account_name}' not found.").into());
+    }
+
+    Ok(account_name)
 }

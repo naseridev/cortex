@@ -87,12 +87,12 @@ fn tag_length_counts_ascii_characters() {
 
 #[test]
 fn tag_length_counts_multibyte_characters() {
-    let tag = "é".repeat(16);
+    let tag = "\u{e9}".repeat(16);
     assert!(TagValidator::validate(&[tag]).is_ok());
 }
 
 #[test]
 fn tag_length_rejects_excessive_characters() {
-    let tag = "é".repeat(31);
+    let tag = "\u{e9}".repeat(31);
     assert!(TagValidator::validate(&[tag]).is_err());
 }

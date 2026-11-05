@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 use cortex::ui::cli::{
-    AccountAction, Cli, CloudAction, CloudProvider, Commands, McpAction, TagAction, VaultAction,
+    AccountAction, Cli, CloudAction, CloudProvider, Commands, TagAction, VaultAction,
 };
 
 fn parse(input: &[&str]) -> Result<Commands, clap::Error> {
@@ -132,30 +132,6 @@ fn account_edit_arguments_are_optional() -> Result<(), Box<dyn std::error::Error
     };
     assert!(name.is_none());
     assert!(new_name.is_none());
-    Ok(())
-}
-
-#[test]
-fn mcp_permission_mode_is_optional_for_viewing() -> Result<(), Box<dyn std::error::Error>> {
-    let Commands::Mcp {
-        action: McpAction::Permission { mode },
-    } = parse(&["mcp", "permission"])?
-    else {
-        return Err("expected mcp permission".into());
-    };
-    assert!(mode.is_none());
-    Ok(())
-}
-
-#[test]
-fn mcp_remove_parses_purge_flag() -> Result<(), Box<dyn std::error::Error>> {
-    let Commands::Mcp {
-        action: McpAction::Remove { purge_accounts },
-    } = parse(&["mcp", "remove", "--purge-accounts"])?
-    else {
-        return Err("expected mcp remove".into());
-    };
-    assert!(purge_accounts);
     Ok(())
 }
 

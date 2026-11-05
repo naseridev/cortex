@@ -1,37 +1,25 @@
-use crate::{
-    core::{
-        crypto::Crypto,
-        password::{Password, PasswordCharset},
-        platform::Platform,
-        storage::Storage,
-    },
-    mcp::config::McpConfig,
-};
-use keyring::Entry;
+use crate::core::{platform::Platform, storage::Storage};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use zeroize::{Zeroize, Zeroizing};
 
 const ACCOUNTS_FILE: &str = "accounts.bin";
-const AGENT_KEYRING_SERVICE: &str = "cortex-agent";
-const AGENT_WRAP_CONTEXT: &str = "cortex agent local key wrap v1";
-const AGENT_MASTER_PASSWORD_LENGTH: usize = 32;
+pub const NO_ACCOUNTS: &str = "No accounts found. Create one with 'account create'.";
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct AccountRegistry {
     active: Option<String>,
     accounts: Vec<String>,
-    #[serde(default)]
-    agent_keys: BTreeMap<String, [u8; 32]>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct LegacyAccountRegistry {
+struct LegacyAgentAccountRegistry {
     active: Option<String>,
     accounts: Vec<String>,
+    #[serde(default)]
+    agent_keys: BTreeMap<String, [u8; 32]>,
 }
 
 pub struct Accounts;
@@ -76,82 +64,6 @@ impl Accounts {
         Ok((registry.accounts, registry.active))
     }
 
-    pub fn is_agent(name: &str) -> Result<bool, Box<dyn std::error::Error>> {
-        let registry = Self::load_registry()?;
-        Ok(registry.agent_keys.contains_key(name) && Self::db_file_exists(name)?)
-    }
-
-    pub fn get_agent_key(name: &str) -> Result<Option<[u8; 32]>, Box<dyn std::error::Error>> {
-        let registry = Self::load_registry()?;
-        let Some(stored) = registry.agent_keys.get(name).copied() else {
-            return Ok(None);
-        };
-
-        if let Some(keyring_key) = Self::load_keyring_agent_key(name) {
-            return Ok(Some(keyring_key));
-        }
-
-        if stored == [0u8; 32] {
-            return Ok(None);
-        }
-
-        Ok(Some(Self::xor_agent_mask(name, &stored)?))
-    }
-
-    pub fn update_agent_key(name: &str, key: &[u8; 32]) -> Result<(), Box<dyn std::error::Error>> {
-        let mut registry = Self::load_registry()?;
-        if registry.accounts.iter().any(|account| account == name) {
-            let fallback = Self::persist_agent_secret(name, key)?;
-            registry.agent_keys.insert(name.to_string(), fallback);
-            Self::save_registry(&registry)?;
-        }
-        Ok(())
-    }
-
-    pub fn list_agents() -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let registry = Self::load_registry()?;
-        Ok(registry
-            .accounts
-            .into_iter()
-            .filter(|name| registry.agent_keys.contains_key(name))
-            .collect())
-    }
-
-    pub fn create_agent(name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        if Self::exists(name)? {
-            return Err(format!("Account '{name}' already exists.").into());
-        }
-
-        let charset = PasswordCharset::from_bits(
-            PasswordCharset::UPPERCASE
-                | PasswordCharset::LOWERCASE
-                | PasswordCharset::DIGITS
-                | PasswordCharset::SPECIAL,
-        );
-
-        let generated = Zeroizing::new(Password::generate(AGENT_MASTER_PASSWORD_LENGTH, charset)?);
-        let (crypto, salt) = Crypto::create(&generated)?;
-
-        let storage = Storage::open_account(name)?;
-        storage.init_db(&crypto, &salt)?;
-        drop(storage);
-
-        let mut registry = Self::load_registry()?;
-        if !registry.accounts.iter().any(|account| account == name) {
-            registry.accounts.push(name.to_string());
-            registry.accounts.sort();
-        }
-
-        let fallback = Self::persist_agent_secret(name, crypto.key())?;
-        registry.agent_keys.insert(name.to_string(), fallback);
-
-        if registry.active.is_none() {
-            registry.active = Some(name.to_string());
-        }
-
-        Self::save_registry(&registry)
-    }
-
     pub fn register(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         let mut registry = Self::load_registry()?;
         if !registry.accounts.iter().any(|account| account == name) {
@@ -186,8 +98,6 @@ impl Accounts {
             return Err(format!("Account '{new_name}' already exists.").into());
         }
 
-        let agent_key = Self::get_agent_key(old_name)?;
-
         let old_path = Self::db_path(old_name)?;
         let new_path = Self::db_path(new_name)?;
 
@@ -210,29 +120,11 @@ impl Accounts {
 
         registry.accounts.sort();
 
-        if let Some(mut old_stored) = registry.agent_keys.remove(old_name) {
-            old_stored.zeroize();
-            Self::delete_keyring_agent_key(old_name);
-            if let Some(mut resolved_key) = agent_key {
-                let fallback = Self::persist_agent_secret(new_name, &resolved_key)?;
-                resolved_key.zeroize();
-                registry.agent_keys.insert(new_name.to_string(), fallback);
-            }
-        }
-
         if registry.active.as_deref() == Some(old_name) {
             registry.active = Some(new_name.to_string());
         }
 
         Self::save_registry(&registry)?;
-
-        if McpConfig::is_initialized()?
-            && let Ok(mut mcp_config) = McpConfig::load()
-            && mcp_config.active_agent_account.as_deref() == Some(old_name)
-        {
-            mcp_config.active_agent_account = Some(new_name.to_string());
-            let _ = mcp_config.save();
-        }
 
         Ok(())
     }
@@ -252,10 +144,6 @@ impl Accounts {
         }
 
         registry.accounts.retain(|account| account != name);
-        if let Some(mut key) = registry.agent_keys.remove(name) {
-            key.zeroize();
-        }
-        Self::delete_keyring_agent_key(name);
 
         let was_active = registry.active.as_deref() == Some(name);
         if was_active {
@@ -263,18 +151,6 @@ impl Accounts {
         }
 
         Self::save_registry(&registry)?;
-
-        if McpConfig::is_initialized()?
-            && let Ok(mut mcp_config) = McpConfig::load()
-            && mcp_config.active_agent_account.as_deref() == Some(name)
-        {
-            mcp_config.active_agent_account = registry
-                .accounts
-                .iter()
-                .find(|acc| registry.agent_keys.contains_key(*acc))
-                .cloned();
-            let _ = mcp_config.save();
-        }
 
         Ok(was_active)
     }
@@ -311,63 +187,6 @@ impl Accounts {
         Ok(())
     }
 
-    fn persist_agent_secret(
-        name: &str,
-        key: &[u8; 32],
-    ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-        let wrapped = Self::xor_agent_mask(name, key)?;
-        let _ = Self::store_keyring_agent_key(name, key);
-        if Self::load_keyring_agent_key(name).as_ref() == Some(key) {
-            Ok([0u8; 32])
-        } else {
-            Ok(wrapped)
-        }
-    }
-
-    fn xor_agent_mask(
-        name: &str,
-        input: &[u8; 32],
-    ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-        let dir = Self::cortex_dir()?;
-        let mut material = Vec::new();
-        material.extend_from_slice(dir.to_string_lossy().as_bytes());
-        material.push(0);
-        material.extend_from_slice(name.as_bytes());
-
-        let mut mask = blake3::derive_key(AGENT_WRAP_CONTEXT, &material);
-        let mut out = [0u8; 32];
-        for i in 0..32 {
-            out[i] = input[i] ^ mask[i];
-        }
-        mask.zeroize();
-        Ok(out)
-    }
-
-    fn store_keyring_agent_key(
-        name: &str,
-        key: &[u8; 32],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let entry = Entry::new(AGENT_KEYRING_SERVICE, name)?;
-        entry.set_secret(key)?;
-        Ok(())
-    }
-
-    fn load_keyring_agent_key(name: &str) -> Option<[u8; 32]> {
-        let entry = Entry::new(AGENT_KEYRING_SERVICE, name).ok()?;
-        let mut secret = entry.get_secret().ok()?;
-        let parsed = <[u8; 32]>::try_from(secret.as_slice()).ok();
-        secret.zeroize();
-        parsed
-    }
-
-    fn delete_keyring_agent_key(name: &str) {
-        if let Ok(entry) = Entry::new(AGENT_KEYRING_SERVICE, name)
-            && entry.get_secret().is_ok()
-        {
-            let _ = entry.delete_credential();
-        }
-    }
-
     fn registry_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
         Ok(Self::cortex_dir()?.join(ACCOUNTS_FILE))
     }
@@ -387,12 +206,11 @@ impl Accounts {
         let mut registry: AccountRegistry = if let Ok(reg) = Storage::decode_value(&bytes) {
             reg
         } else {
-            let legacy: LegacyAccountRegistry = Storage::decode_value(&bytes)
+            let legacy: LegacyAgentAccountRegistry = Storage::decode_value(&bytes)
                 .map_err(|error| format!("Invalid accounts registry data: {error}"))?;
             AccountRegistry {
                 active: legacy.active,
                 accounts: legacy.accounts,
-                agent_keys: BTreeMap::new(),
             }
         };
 
@@ -404,9 +222,6 @@ impl Accounts {
         }
 
         valid_accounts.sort();
-        registry
-            .agent_keys
-            .retain(|name, _| valid_accounts.contains(name));
         registry.accounts = valid_accounts;
 
         let active_is_valid = registry

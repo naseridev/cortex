@@ -1,18 +1,8 @@
+use crate::support::sample_entry;
 use cortex::cloud::engine::{CLOCK_SKEW_TOLERANCE_SECS, ClockSkew, SyncEngine, SyncState};
-use cortex::core::{crypto::Crypto, types::PasswordEntry};
+use cortex::core::crypto::Crypto;
 
 use crate::common::TestResult;
-
-fn sample_entry(
-    crypto: &Crypto,
-    name: &str,
-    pass: &str,
-    timestamp: u64,
-) -> Result<PasswordEntry, Box<dyn std::error::Error>> {
-    let mut entry = crypto.create_entry(name, pass.as_bytes(), None, None)?;
-    entry.timestamp = timestamp;
-    Ok(entry)
-}
 
 #[test]
 fn skew_reports_remote_clock_ahead_of_this_device() {

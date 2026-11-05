@@ -1,13 +1,13 @@
-use super::resolve_name;
+use super::resolve_existing;
 use crate::{
     core::{
         accounts::Accounts,
         crypto::Crypto,
+        gateway::Gateway,
         password::Password,
+        session::Session,
         types::{PasswordEntry, SecretText},
-        validation::Validation,
     },
-    modules::{gateway::Gateway, session::Session},
     ui::prompt::UserPrompt,
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -32,18 +32,7 @@ impl Drop for PlainEntry {
 }
 
 pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let (accounts, _) = Accounts::list()?;
-    if accounts.is_empty() {
-        return Err("No accounts found. Create one with 'account create'.".into());
-    }
-
-    let account_name = resolve_name(name, "Account name: ")?;
-    Validation::check_account_name(&account_name)?;
-
-    if !Accounts::exists(&account_name)? {
-        return Err(format!("Account '{account_name}' not found.").into());
-    }
-
+    let account_name = resolve_existing(name, "Account name: ")?;
     perform_reset(&account_name)
 }
 
@@ -67,10 +56,6 @@ fn perform_reset(account_name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let updated_entries = reencrypt_all(&plain_entries, &new_crypto)?;
 
     storage.atomic_reset(&updated_entries, &new_crypto, &new_salt)?;
-
-    if Accounts::is_agent(account_name)? {
-        Accounts::update_agent_key(account_name, new_crypto.key())?;
-    }
 
     if Accounts::active()?.as_deref() == Some(account_name) {
         Session::clear_session()?;

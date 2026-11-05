@@ -36,17 +36,14 @@ impl Operator {
     }
 }
 
-pub struct Security;
+pub struct Confirmation;
 
-impl Security {
-    pub fn generate_math_puzzle() -> Result<(String, i64), Box<dyn std::error::Error>> {
+impl Confirmation {
+    pub fn math_puzzle() -> Result<(String, i64), Box<dyn std::error::Error>> {
         let mut rng = rand::rng();
-        for _ in 0..PUZZLE_ATTEMPTS {
-            if let Some(puzzle) = Self::try_math_puzzle(&mut rng) {
-                return Ok(puzzle);
-            }
-        }
-        Err("Could not generate a confirmation puzzle".into())
+        (0..PUZZLE_ATTEMPTS)
+            .find_map(|_| Self::try_math_puzzle(&mut rng))
+            .ok_or_else(|| "Could not generate a confirmation puzzle".into())
     }
 
     fn try_math_puzzle(rng: &mut ThreadRng) -> Option<(String, i64)> {
@@ -56,32 +53,25 @@ impl Security {
         let first = Operator::random(rng);
         let second = Operator::random(rng);
 
-        let intermediate = first.apply(a, b)?;
-        if intermediate <= 0 {
-            return None;
-        }
-
-        let answer = second.apply(intermediate, c)?;
-        if answer <= 0 {
-            return None;
-        }
+        let intermediate = first.apply(a, b).filter(|value| *value > 0)?;
+        let answer = second.apply(intermediate, c).filter(|value| *value > 0)?;
 
         let expression = format!("({a} {} {b}) {} {c}", first.symbol(), second.symbol());
         Some((expression, answer))
     }
 
-    pub fn confirmation(warning_message: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn require(warning: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!();
-        println!("WARNING: {warning_message}");
+        println!("WARNING: {warning}");
         println!();
 
-        let (puzzle, answer) = Self::generate_math_puzzle()?;
+        let (puzzle, answer) = Self::math_puzzle()?;
         println!("Solve this equation to confirm: {puzzle}");
 
-        let user_answer = UserPrompt::text("Answer: ")?;
-        let user_number: i64 = user_answer.parse().map_err(|_| "Invalid number")?;
+        let response = UserPrompt::text("Answer: ")?;
+        let number: i64 = response.parse().map_err(|_| "Invalid number")?;
 
-        if user_number != answer {
+        if number != answer {
             return Err("Wrong answer. Operation cancelled.".into());
         }
 

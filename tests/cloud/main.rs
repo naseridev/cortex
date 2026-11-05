@@ -6,4 +6,5 @@ mod config;
 mod engine;
 mod faults;
 mod provider;
+mod support;
 mod tombstones;

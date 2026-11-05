@@ -5,8 +5,11 @@ use crate::{
         config::{CloudConfig, CloudRemote, SyncRecord},
         engine::{ClockSkew, MergeReport, SyncEngine, SyncState, SyncStatus},
     },
-    core::{accounts::Accounts, crypto::Crypto, dump::Dump, storage::Storage, time::Time},
-    modules::{gateway::Gateway, session::Session},
+    core::{
+        accounts::Accounts, crypto::Crypto, gateway::Gateway, session::Session, storage::Storage,
+        time::Time,
+    },
+    formats::dump::Dump,
     ui::prompt::UserPrompt,
 };
 

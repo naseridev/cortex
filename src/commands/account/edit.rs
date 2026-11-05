@@ -1,24 +1,11 @@
-use super::resolve_name;
-use crate::{
-    core::{accounts::Accounts, validation::Validation},
-    modules::gateway::Gateway,
-};
+use super::{resolve_existing, resolve_name};
+use crate::core::{accounts::Accounts, gateway::Gateway, validation::Validation};
 
 pub fn execute(
     name: Option<String>,
     new_name: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (accounts, _) = Accounts::list()?;
-    if accounts.is_empty() {
-        return Err("No accounts found. Create one with 'account create'.".into());
-    }
-
-    let current_name = resolve_name(name, "Account name: ")?;
-    Validation::check_account_name(&current_name)?;
-
-    if !Accounts::exists(&current_name)? {
-        return Err(format!("Account '{current_name}' not found.").into());
-    }
+    let current_name = resolve_existing(name, "Account name: ")?;
 
     let (storage, _) = Gateway::login_account(&current_name)?;
     drop(storage);

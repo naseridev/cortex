@@ -34,6 +34,26 @@ pub struct CloudClient {
     local_root: Option<PathBuf>,
 }
 
+macro_rules! oauth_builder {
+    ($service:path, $root:expr, $creds:expr) => {{
+        let creds: &CloudCredentials = $creds;
+        let mut builder = <$service>::default().root($root);
+        if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
+            builder = builder.access_token(token);
+        }
+        if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
+            builder = builder.refresh_token(refresh);
+        }
+        if let Some(id) = creds.client_id.as_deref().filter(|s| !s.is_empty()) {
+            builder = builder.client_id(id);
+        }
+        if let Some(secret) = creds.client_secret.as_deref().filter(|s| !s.is_empty()) {
+            builder = builder.client_secret(secret);
+        }
+        builder
+    }};
+}
+
 impl CloudClient {
     pub fn connect(remote: &CloudRemote) -> Result<Self, Box<dyn std::error::Error>> {
         let creds = CloudConfig::load_credentials(remote)?;
@@ -385,40 +405,14 @@ impl CloudClient {
         root: &str,
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
-        let mut builder = services::Gdrive::default().root(root);
-        if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.access_token(token);
-        }
-        if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.refresh_token(refresh);
-        }
-        if let Some(id) = creds.client_id.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.client_id(id);
-        }
-        if let Some(secret) = creds.client_secret.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.client_secret(secret);
-        }
-        Ok(Operator::new(builder)?.finish())
+        Ok(Operator::new(oauth_builder!(services::Gdrive, root, creds))?.finish())
     }
 
     fn build_dropbox(
         root: &str,
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
-        let mut builder = services::Dropbox::default().root(root);
-        if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.access_token(token);
-        }
-        if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.refresh_token(refresh);
-        }
-        if let Some(id) = creds.client_id.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.client_id(id);
-        }
-        if let Some(secret) = creds.client_secret.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.client_secret(secret);
-        }
-        Ok(Operator::new(builder)?.finish())
+        Ok(Operator::new(oauth_builder!(services::Dropbox, root, creds))?.finish())
     }
 
     fn build_onedrive(

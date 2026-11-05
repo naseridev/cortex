@@ -1,4 +1,4 @@
-use cortex::core::dump::{Dump, DumpFile};
+use cortex::formats::dump::{Dump, DumpFile};
 
 use crate::common::{TestResult, failure};
 

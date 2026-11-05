@@ -1,7 +1,4 @@
-use crate::{
-    core::{crypto::Crypto, types::PasswordEntry, validation::Validation},
-    modules::gateway::Gateway,
-};
+use crate::core::{crypto::Crypto, gateway::Gateway, types::PasswordEntry, validation::Validation};
 use regex::{Regex, RegexBuilder};
 
 const MAX_SHOWN_RESULTS: usize = 20;

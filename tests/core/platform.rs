@@ -1,6 +1,6 @@
 #[cfg(unix)]
 mod unix {
-    use cortex::modules::platform::Platform;
+    use cortex::core::platform::Platform;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;

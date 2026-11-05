@@ -1,7 +1,7 @@
 use cortex::core::crypto::Crypto;
-use cortex::core::interchange::{CSV_HEADER, FORMAT_VERSION, Interchange};
 use cortex::core::limits::MAX_ENTRIES;
 use cortex::core::types::{EncryptedExport, ExportData, ExportEntry};
+use cortex::formats::interchange::{CSV_HEADER, FORMAT_VERSION, Interchange};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::common::{TestResult, failure};

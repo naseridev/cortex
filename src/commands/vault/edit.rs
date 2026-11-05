@@ -1,12 +1,12 @@
 use crate::{
     core::{
+        gateway::Gateway,
         limits::{MAX_DESCRIPTION_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
         password::Password,
         tags::TagValidator,
         types::SecretText,
         validation::Validation,
     },
-    modules::gateway::Gateway,
     ui::prompt::UserPrompt,
 };
 use zeroize::Zeroizing;

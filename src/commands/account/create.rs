@@ -1,10 +1,9 @@
 use super::resolve_name;
 use crate::{
     core::{
-        accounts::Accounts, crypto::Crypto, password::Password, storage::Storage,
+        accounts::Accounts, crypto::Crypto, password::Password, session::Session, storage::Storage,
         validation::Validation,
     },
-    modules::session::Session,
     ui::prompt::UserPrompt,
 };
 

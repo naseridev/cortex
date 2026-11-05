@@ -1,4 +1,4 @@
-use crate::{cloud::config::CloudConfig, modules::security::Security};
+use crate::{cloud::config::CloudConfig, ui::confirm::Confirmation};
 
 pub fn execute(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     let trimmed = name.trim();
@@ -11,7 +11,7 @@ pub fn execute(name: &str) -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Cloud remote '{trimmed}' not found.").into());
     }
 
-    Security::confirmation(&format!(
+    Confirmation::require(&format!(
         "This will remove cloud remote '{trimmed}' and delete its stored credentials."
     ))?;
 

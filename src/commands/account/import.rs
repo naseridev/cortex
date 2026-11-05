@@ -1,13 +1,12 @@
 use crate::{
     core::{
         crypto::Crypto,
-        dump::Dump,
-        interchange::Interchange,
+        gateway::Gateway,
         limits::{MAX_ENTRIES, MAX_EXPORT_FILE_BYTES},
         storage::Storage,
         types::{ExportEntry, PasswordEntry},
     },
-    modules::gateway::Gateway,
+    formats::{dump::Dump, interchange::Interchange},
     ui::prompt::UserPrompt,
 };
 use std::{collections::HashSet, fs, path::Path};

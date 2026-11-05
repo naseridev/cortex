@@ -5,9 +5,12 @@ use crate::{
         config::{CloudConfig, SyncRecord},
         engine::SyncEngine,
     },
-    core::{accounts::Accounts, crypto::Crypto, dump::Dump, storage::Storage, time::Time},
-    modules::{gateway::Gateway, security::Security, session::Session},
-    ui::prompt::UserPrompt,
+    core::{
+        accounts::Accounts, crypto::Crypto, gateway::Gateway, session::Session, storage::Storage,
+        time::Time,
+    },
+    formats::dump::Dump,
+    ui::{confirm::Confirmation, prompt::UserPrompt},
 };
 
 pub fn execute(
@@ -48,22 +51,22 @@ pub fn execute(
             })
             .unwrap_or(false);
 
-        if !matches_remote_password {
+        if matches_remote_password {
+            existing_storage
+        } else {
             drop(existing_storage);
             eprintln!(
                 "Local account '{account_name}' uses a different master password. Authenticate local account to replace it:"
             );
             let (authed_storage, _) = Gateway::login_account_for_recovery(&account_name)?;
             authed_storage
-        } else {
-            existing_storage
         }
     } else {
         Storage::open_account(&account_name)?
     };
 
     if local_exists && !overwrite {
-        Security::confirmation(&format!(
+        Confirmation::require(&format!(
             "This will replace local account '{account_name}' with the cloud version ({} entries).",
             snapshot.user_count()
         ))?;
@@ -76,8 +79,6 @@ pub fn execute(
 
     if !local_exists {
         Accounts::register(&account_name)?;
-    } else if Accounts::is_agent(&account_name)? {
-        Accounts::update_agent_key(&account_name, crypto.key())?;
     }
 
     if Accounts::active()?.as_deref() == Some(account_name.as_str()) {

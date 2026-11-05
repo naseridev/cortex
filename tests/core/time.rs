@@ -1,4 +1,4 @@
-use cortex::modules::time::Time;
+use cortex::core::time::Time;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]

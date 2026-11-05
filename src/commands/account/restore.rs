@@ -1,15 +1,15 @@
 use crate::{
     core::{
-        crypto::Crypto, dump::Dump, limits::MAX_DUMP_BYTES, storage::Storage,
-        validation::Validation,
+        crypto::Crypto, gateway::Gateway, limits::MAX_DUMP_BYTES, session::Session,
+        storage::Storage, validation::Validation,
     },
-    modules::{gateway::Gateway, security::Security, session::Session},
-    ui::prompt::UserPrompt,
+    formats::dump::Dump,
+    ui::{confirm::Confirmation, prompt::UserPrompt},
 };
 use std::{fs, path::Path};
 
 pub fn execute(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    Validation::storage_probe(true, "No accounts found. Create one with 'account create'.")?;
+    Validation::storage_probe(true, crate::core::accounts::NO_ACCOUNTS)?;
 
     let path = Path::new(file_path);
     let size = fs::metadata(path)
@@ -38,7 +38,7 @@ pub fn execute(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
         snapshot.user_count()
     );
 
-    Security::confirmation(
+    Confirmation::require(
         "This replaces everything currently stored in the database with the contents of this dump.",
     )?;
 

@@ -1,15 +1,16 @@
 pub use crate::core::snapshot::Snapshot;
-pub use crate::mcp::config::{McpConfig, McpPermission};
 
-use crate::core::{
-    accounts::Accounts,
-    crypto::Crypto,
-    dump::DumpFile,
-    integrity::{Changes, Integrity, MANIFEST_KEY, Records},
-    limits::MAX_ENTRIES,
-    platform::Platform,
-    time::Time,
-    types::PasswordEntry,
+use crate::{
+    core::{
+        accounts::Accounts,
+        crypto::Crypto,
+        integrity::{Changes, Integrity, MANIFEST_KEY, Records},
+        limits::MAX_ENTRIES,
+        platform::Platform,
+        time::Time,
+        types::PasswordEntry,
+    },
+    formats::dump::DumpFile,
 };
 use redb::{Database, DatabaseError, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
@@ -477,8 +478,7 @@ impl Storage {
     }
 
     pub fn get_db_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let active =
-            Accounts::active()?.ok_or("No accounts found. Create one with 'account create'.")?;
+        let active = Accounts::active()?.ok_or(crate::core::accounts::NO_ACCOUNTS)?;
         Accounts::db_path(&active)
     }
 

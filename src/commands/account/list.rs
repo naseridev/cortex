@@ -4,20 +4,18 @@ pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let (accounts, active) = Accounts::list()?;
 
     if accounts.is_empty() {
-        println!("No accounts found. Create one with 'account create'.");
+        println!("{}", crate::core::accounts::NO_ACCOUNTS);
         return Ok(());
     }
 
     println!("\nAccounts:");
     for name in accounts {
         let printable = Validation::printable(&name);
-        let is_agent = Accounts::is_agent(&name)?;
-        let tag = if is_agent { " [agent]" } else { "" };
 
         if active.as_deref() == Some(name.as_str()) {
-            println!("  * {printable}{tag} (active)");
+            println!("  * {printable} (active)");
         } else {
-            println!("    {printable}{tag}");
+            println!("    {printable}");
         }
     }
 

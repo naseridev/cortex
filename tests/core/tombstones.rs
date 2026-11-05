@@ -1,20 +1,13 @@
+use crate::support::setup_vault;
 use cortex::core::crypto::Crypto;
-use cortex::core::dump::Dump;
 use cortex::core::storage::Storage;
 use cortex::core::types::PasswordEntry;
+use cortex::formats::dump::Dump;
 use tempfile::TempDir;
 
 use crate::common::{TestResult, failure};
 
 const ALPHA_TOMBSTONE: &[u8] = b"__tombstone__/alpha";
-
-fn setup_vault() -> Result<(TempDir, Storage, Crypto), Box<dyn std::error::Error>> {
-    let dir = TempDir::new()?;
-    let storage = Storage::open_at(&dir.path().join("vault.redb"))?;
-    let crypto = Crypto::from_key([9u8; 32]);
-    storage.init_db(&crypto, &Crypto::encode_salt(&[4u8; 32]))?;
-    Ok((dir, storage, crypto))
-}
 
 fn make_entry(
     crypto: &Crypto,

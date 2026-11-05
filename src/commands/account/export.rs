@@ -1,13 +1,14 @@
 use crate::{
     core::{
         crypto::Crypto,
-        interchange::Interchange,
+        gateway::Gateway,
         limits::MAX_ENTRIES,
         platform::Platform,
         storage::Storage,
         types::{ExportEntry, PasswordEntry, SecretText},
     },
-    modules::{gateway::Gateway, security::Security},
+    formats::interchange::Interchange,
+    ui::confirm::Confirmation,
 };
 use rand::RngExt;
 use std::{
@@ -30,7 +31,7 @@ impl Drop for Collected {
 
 pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let (storage, crypto) = Gateway::login()?;
-    Security::confirmation("This export writes every password in plain text to a CSV file.")?;
+    Confirmation::require("This export writes every password in plain text to a CSV file.")?;
 
     let mut collected = collect_entries(&storage, &crypto)?;
     if collected.entries.is_empty() {

@@ -40,18 +40,23 @@ macro_rules! oauth_builder {
     ($service:path, $root:expr, $creds:expr) => {{
         let creds: &CloudCredentials = $creds;
         let mut builder = <$service>::default().root($root);
+
         if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_token(token);
         }
+
         if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.refresh_token(refresh);
         }
+
         if let Some(id) = creds.client_id.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.client_id(id);
         }
+
         if let Some(secret) = creds.client_secret.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.client_secret(secret);
         }
+
         builder
     }};
 }
@@ -68,9 +73,11 @@ impl CloudClient {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let operator = Self::build_operator(settings, creds)?;
         let mut client = Self::from_operator(operator)?;
+
         if let ProviderSettings::Local { root } = settings {
             client.local_root = Some(PathBuf::from(root));
         }
+
         Ok(client)
     }
 
@@ -79,6 +86,7 @@ impl CloudClient {
             .enable_all()
             .build()
             .map_err(|error| format!("Failed to initialize cloud runtime: {error}"))?;
+
         Ok(Self {
             operator,
             runtime,
@@ -112,9 +120,11 @@ impl CloudClient {
                 Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
                 Err(err) => return Err(format!("Failed to stat remote vault: {err}").into()),
             };
+
             if metadata.content_length() > MAX_DUMP_BYTES {
                 return Err("Remote vault file exceeds the maximum allowed size.".into());
             }
+
             let etag = metadata.etag().map(str::to_owned);
 
             match self.operator.read(&path).await {
@@ -193,6 +203,7 @@ impl CloudClient {
             }
             _ => None,
         };
+
         let if_absent =
             matches!(precondition, Precondition::Absent) && capability.write_with_if_not_exists;
 
@@ -422,9 +433,11 @@ impl CloudClient {
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
         let mut builder = services::Onedrive::default().root(root);
+
         if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_token(token);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -439,15 +452,19 @@ impl CloudClient {
             .bucket(bucket)
             .region(region)
             .root(prefix);
+
         if let Some(ep) = endpoint.filter(|s| !s.is_empty()) {
             builder = builder.endpoint(ep);
         }
+
         if let Some(ak) = creds.access_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_key_id(ak);
         }
+
         if let Some(sk) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.secret_access_key(sk);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -458,15 +475,19 @@ impl CloudClient {
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
         let mut builder = services::Gcs::default().bucket(bucket).root(prefix);
+
         if let Some(ep) = endpoint.filter(|s| !s.is_empty()) {
             builder = builder.endpoint(ep);
         }
+
         if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.token(token.to_string());
         }
+
         if let Some(cred) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.credential(cred);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -484,9 +505,11 @@ impl CloudClient {
             .account_name(account)
             .endpoint(resolved_ep)
             .root(prefix);
+
         if let Some(key) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.account_key(key);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -500,12 +523,15 @@ impl CloudClient {
             .bucket(bucket)
             .bucket_id(bucket_id)
             .root(prefix);
+
         if let Some(id) = creds.access_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.application_key_id(id);
         }
+
         if let Some(key) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.application_key(key);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -519,12 +545,15 @@ impl CloudClient {
             .bucket(bucket)
             .endpoint(endpoint)
             .root(prefix);
+
         if let Some(ak) = creds.access_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_key_id(ak);
         }
+
         if let Some(sk) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_key_secret(sk);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -538,12 +567,15 @@ impl CloudClient {
             .bucket(bucket)
             .endpoint(endpoint)
             .root(prefix);
+
         if let Some(id) = creds.access_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.secret_id(id);
         }
+
         if let Some(key) = creds.secret_key.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.secret_key(key);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -557,9 +589,11 @@ impl CloudClient {
             .endpoint(endpoint)
             .username(username)
             .root(root);
+
         if let Some(pass) = creds.password.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.password(pass);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -568,9 +602,11 @@ impl CloudClient {
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
         let mut builder = services::YandexDisk::default().root(root);
+
         if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_token(token);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -584,9 +620,11 @@ impl CloudClient {
             .endpoint(endpoint)
             .email(email)
             .root(root);
+
         if let Some(pass) = creds.password.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.password(pass);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 
@@ -597,12 +635,15 @@ impl CloudClient {
         creds: &CloudCredentials,
     ) -> Result<Operator, Box<dyn std::error::Error>> {
         let mut builder = services::Webdav::default().endpoint(endpoint).root(root);
+
         if let Some(user) = username.filter(|s| !s.is_empty()) {
             builder = builder.username(user);
         }
+
         if let Some(pass) = creds.password.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.password(pass);
         }
+
         Ok(Operator::new(builder)?.finish())
     }
 }

@@ -92,6 +92,7 @@ fn slots(state: &SyncState) -> BTreeMap<&str, Slot<'_>> {
             Some(Slot::Live(entry)) if entry.timestamp > *deleted_at => Slot::Live(entry),
             _ => Slot::Deleted(*deleted_at),
         };
+
         map.insert(name.as_str(), slot);
     }
 
@@ -144,6 +145,7 @@ impl SyncEngine {
             if local_hash == base_hash {
                 return SyncStatus::RemoteAhead;
             }
+
             if remote_hash == base_hash {
                 return SyncStatus::LocalAhead;
             }
@@ -215,6 +217,7 @@ impl SyncEngine {
 
             let name = String::from_utf8(key.clone())
                 .map_err(|_| "Remote snapshot contains invalid UTF-8 entry name")?;
+
             let entry: PasswordEntry = Storage::decode_value(value)?;
             state.entries.push((name, entry));
         }
@@ -266,6 +269,7 @@ impl SyncEngine {
             kept_local: 0,
             clock: 0,
         };
+
         let mut clock = 0u64;
 
         for name in names {
@@ -342,6 +346,7 @@ impl SyncEngine {
             description.as_deref(),
             tag_slice,
         )?;
+
         reencrypted.timestamp = entry.timestamp;
         Ok(reencrypted)
     }

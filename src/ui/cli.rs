@@ -1,15 +1,7 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(
-    name = "cortex",
-    about = "Keep your passwords safe",
-    version = "4.0.0",
-    author = "Nima Naseri <nerdnull@proton.me>"
-)]
-#[command(
-    long_about = "A no-nonsense password manager using Argon2id key derivation and authenticated encryption."
-)]
+#[command(author, version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

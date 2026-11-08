@@ -1,232 +1,114 @@
 # Cortex Password Manager
 
-A hardware-backed password manager implemented in Rust, featuring military-grade encryption, hardware-bound key derivation, and session management for maximum security.
+Cortex is a secure, multi-account password manager written in Rust. It uses Argon2id for key derivation, ChaCha20-Poly1305 for authenticated encryption, BLAKE3 for tamper detection, and OpenDAL for cloud sync across multiple storage backends.
 
 ## Overview
 
-Cortex is a command-line password manager that uses ChaCha20-Poly1305 authenticated encryption combined with hardware fingerprinting to create unique encryption keys. The system binds passwords to specific hardware configurations, making unauthorized access significantly more difficult even if the database is compromised.
+Cortex gives you an encrypted command-line vault that stays responsive and easy to script. It protects against offline attacks by combining modern primitives: Argon2id hashes your master password, ChaCha20-Poly1305 encrypts entries with associated data, and BLAKE3 manifests detect any external edits or rollbacks to the database file.
 
-## Features
+Version 4.0.0 separates data into isolated accounts, adds encrypted full-database dumps, supports plaintext CSV imports and exports, clears your clipboard automatically, and syncs encrypted vaults across 15 cloud providers.
 
-### Core Security
-- **Hardware-Bound Encryption**: Keys are derived using hardware characteristics (CPU brand, system components)
-- **ChaCha20-Poly1305 AEAD**: Military-grade authenticated encryption with authentication tags
-- **BLAKE3 Hashing**: High-performance cryptographic hashing for key derivation (600,000 iterations)
-- **Secure Memory Handling**: Automatic memory zeroing using the `zeroize` crate
-- **Session Management**: Encrypted session caching with configurable timeouts and machine binding
+## Key Features
 
-### Password Management
-- **Tag-Based Organization**: Organize passwords with multiple tags (up to 20 per entry)
-- **Advanced Search**: Search by name, description, or tags with regex and case-insensitive options
-- **Password Generation**: Secure password generator with customizable character sets
-- **Description Support**: Optional descriptions (up to 500 characters) with security validation
+### Security and Cryptography
+* **Argon2id Key Derivation**: Configured with 64 MiB memory, 3 iterations, and 1 lane to protect against GPU and ASIC cracking.
+* **ChaCha20-Poly1305 AEAD**: Every password, description, and tag list is encrypted with an authenticated cipher. Entry names are bound as associated data to prevent swapping ciphertext between entries.
+* **Database Integrity**: A keyed BLAKE3 manifest recalculates on every commit. If someone alters, deletes, or rolls back records outside Cortex, the database refuses to open.
+* **Memory Safety**: Sensitive buffers, decrypted passwords, and master keys implement automatic zeroing on drop through the zeroize crate.
+* **Keyring Sessions**: Once unlocked, Cortex caches the derived key in your operating system credential store (Linux Secret Service, macOS Keychain, or Windows Credential Manager) for 8 minutes so you do not have to type your master password repeatedly.
+* **Throttling**: Failed login attempts trigger exponential backoff delays to stop automated guessing in the terminal.
 
-### Data Management
-- **JSON Import/Export**: Import and export passwords in structured JSON format
-- **Template Generation**: Create sample import templates for bulk operations
-- **Automatic Backups**: Backup creation before critical operations (keeps last 5 backups)
-- **Batch Operations**: Add/remove tags and import multiple entries with validation
-- **Rollback Support**: Automatic rollback on import failures
+### Multi-Account Vaults
+* **Account Isolation**: Each account has its own master password, cryptographic salt, and separate storage file.
+* **Hidden File Names**: Database files are stored using the BLAKE3 hash of the account name, keeping names private on disk.
+* **Account Controls**: Create, switch, rename, delete, and reset accounts directly from the CLI.
+* **ACID Storage**: Embedded storage runs on redb for transactional safety and crash recovery.
 
-### User Experience
-- **Session Caching**: Stay authenticated for configurable duration (default: 480 seconds / 8 minutes)
-- **Configurable Settings**: Customize session timeout (60 seconds to 24 hours)
-- **Lock Command**: Manually clear session when needed
-- **Progress Indicators**: Real-time feedback for long-running operations
-- **Validation**: Comprehensive input validation with helpful error messages
+### Entry and Tag Management
+* **Tags**: Add up to 20 normalized tags per entry for easy filtering.
+* **Regex Search**: Search across entry names, decrypted notes, and tags with optional case insensitivity.
+* **Password Generator**: Generate passwords using customizable character sets (uppercase, lowercase, digits, and special characters).
+* **Clipboard Clearing**: Copies secrets directly to your clipboard and wipes them after 60 seconds (or immediately if you press Ctrl+C).
+
+### Backups and Sync
+* **Encrypted Dumps**: Export binary snapshot files (.bin) containing the full database state.
+* **CSV Interchange**: Import and export standard CSV files for migration to or from other tools.
+* **Tombstone Tracking**: Deleted entries leave timestamps so cloud sync operations do not resurrect them later.
+* **Multi-Cloud Sync**: Sync directly with Google Drive, Dropbox, OneDrive, Nextcloud, AWS S3, Google Cloud Storage, Azure Blob, Backblaze B2, Alibaba OSS, Tencent COS, pCloud, Yandex Disk, Koofr, WebDAV, or local storage directories.
+
+## Architecture
+
+The codebase is split into focused modules:
+
+* `storage`: Database engine logic (redb), CRUD operations, metadata, maintenance, snapshots, and account registration.
+* `security`: Argon2id derivation, ChaCha20-Poly1305 AEAD, master password checks, throttling, and keyring sessions.
+* `domain`: Data types (PasswordEntry, ExportEntry), validation rules, tag normalization, and limits.
+* `system`: OS-level file permission handling (0600 and 0700 permissions on Unix, explicit ACLs on Windows) and system clocks.
+* `cloud`: Client backends, provider settings, and the multi-device sync engine.
+* `formats`: Binary dump files and CSV encoding or decoding.
+* `commands`: CLI subcommand execution for accounts, vaults, cloud sync, and password generation.
+* `ui`: Terminal prompts, clipboard workers, math puzzles, and CLI argument parsing.
 
 ## Installation
 
-### From Source
+### Prerequisites
+* Linux, macOS, or Windows
+* Rust 1.90.0 or later (Rust 2024 Edition)
 
-Clone the repository:
+### Build from Source
+
 ```bash
 git clone https://github.com/naseridev/cortex.git
 cd cortex
+cargo build --release
 ```
 
-Build and install:
+Install the compiled binary into your cargo path:
 ```bash
 cargo install --path .
 ```
 
-Verify installation:
+Confirm that the installation succeeded:
 ```bash
 cortex --version
-# Output: cortex 3.0.0
 ```
-
-### From Binary
-
-Download pre-compiled binaries from the [Releases](https://github.com/naseridev/cortex/releases) page.
-
-### System Requirements
-
-- **Operating System**: Linux, macOS, or Windows
-- **Rust Version**: 1.70.0 or later (for building from source)
-- **RAM**: Minimum 100MB available memory
-- **Storage**: 10MB for application + variable for password database
-- **Hardware**: CPU with brand information accessible via system APIs
 
 ## Quick Start
 
-Initialize the database:
+Create your first account:
 ```bash
-cortex init
+cortex account create
 ```
 
-Create your first password:
+Store a password:
 ```bash
-cortex create "github-work" --tags "work,dev"
+cortex vault create "github" --tags "work,dev"
 ```
 
-Retrieve a password:
+Copy the password to your clipboard (clears automatically in 60 seconds):
 ```bash
-cortex get "github-work"
+cortex vault get "github"
 ```
 
-List all entries:
+Print the password directly in the terminal:
 ```bash
-cortex list
+cortex vault get "github" --show
+```
+
+List all stored entries:
+```bash
+cortex vault list --tags
+```
+
+Lock your session immediately:
+```bash
+cortex vault lock
 ```
 
 ## Documentation
 
-For detailed usage instructions, command reference, and advanced features, see the [User Guide](README.wiki.md).
-
-## Security Architecture
-
-### Key Derivation
-```
-Hardware_ID = BLAKE3(CPU_Brand || "cortex_hardware_binding")
-Derived_Key = BLAKE3^600000(Master_Password || Salt || Hardware_ID)
-```
-
-The hardware fingerprint is generated from:
-- CPU brand information
-- System component identifiers
-- Hardware binding constant
-
-### Session Security
-```
-Session_Key = BLAKE3^300000(CPU_Brand || "cortex_session_key_v3" || Session_Salt)
-Encrypted_Session = ChaCha20Poly1305(Master_Password, Session_Key, Nonce)
-```
-
-Session validation includes:
-- Machine hash verification (prevents cross-device session theft)
-- Configurable timeout enforcement
-- Maximum age limit (24 hours)
-- Failed attempt tracking (max 3 attempts)
-- Secure session file permissions (0600 on Unix)
-
-### Data Structure
-Each password entry contains:
-- Encrypted password data (ChaCha20-Poly1305)
-- Optional encrypted description (separate nonce)
-- Optional encrypted tags (JSON serialized, separate nonce)
-- Three unique 96-bit nonces (password, description, tags)
-- Creation/modification timestamp
-
-## Configuration
-
-### Database Location
-- **Linux**: `~/.config/cortex/.password-store`
-- **macOS**: `~/Library/Application Support/cortex/.password-store`
-- **Windows**: `%APPDATA%/cortex/.password-store`
-
-### Session File Location
-- **Linux**: `~/.cache/cortex/.cortex_session`
-- **macOS**: `~/Library/Caches/cortex/.cortex_session`
-- **Windows**: `%LOCALAPPDATA%/cortex/.cortex_session`
-
-### Backup Location
-Database backups stored in: `[database_dir]/backups/`
-- Automatic backup before `reset` command
-- Automatic backup on initialization
-- Keeps last 5 backups
-- Named: `backup_[timestamp].db`
-
-### File Permissions (Unix)
-- Database directory: `0700` (owner only)
-- Database files: `0600` (owner read/write)
-- Session file: `0600` (owner read/write)
-- Export files: `0600` (owner read/write)
-
-## Security Considerations
-
-### Encryption
-- **Algorithm**: ChaCha20-Poly1305 AEAD
-- **Key Size**: 256 bits
-- **Nonce Size**: 96 bits (12 bytes), unique per encryption
-- **KDF Iterations**: 600,000 (BLAKE3)
-- **Session KDF**: 300,000 iterations (lighter for performance)
-
-### Hardware Binding
-- **Purpose**: Prevent database transfer attacks
-- **Components**: CPU brand, system identifiers
-- **Effect**: Database cannot be decrypted on different hardware
-- **Warning**: Hardware changes require export before migration
-
-### Memory Security
-- **SecureString**: Automatic zeroing on drop
-- **SessionData**: Zeroize implementation for all sensitive fields
-- **Password Prompts**: Hidden input, no echo
-
-## Dependencies
-
-### Core Security
-- `blake3` (1.5.x): High-performance cryptographic hashing
-- `chacha20poly1305` (0.10.x): Authenticated encryption
-- `rand` (0.8.x): Cryptographically secure RNG
-- `zeroize` (1.7.x): Secure memory clearing
-
-### Storage
-- `sled` (0.34.x): Embedded database engine
-- `bincode` (1.3.x): Binary serialization
-- `serde` (1.0.x): Serialization framework
-- `serde_json` (1.0.x): JSON support
-
-### System
-- `sysinfo` (0.30.x): Hardware information
-- `dirs` (5.0.x): Standard directory locations
-- `fs2` (0.4.x): File locking (Unix)
-
-### CLI
-- `clap` (4.5.x): Command-line parsing with derive macros
-- `rpassword` (7.3.x): Secure password input
-
-### Utilities
-- `regex` (1.10.x): Pattern matching
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-### Development Setup
-```bash
-git clone https://github.com/naseridev/cortex.git
-```
-```bash
-cd cortex
-```
-```bash
-cargo build
-```
+For full command documentation, cloud configuration steps, and operational guides, see the [User Guide](README.wiki.md).
 
 ## Author
 
 Nima Naseri <nerdnull@proton.me>
-
----
-
-**Critical Warning**: This software binds encryption keys to hardware characteristics. Transferring the database to different hardware will result in permanent data loss. Always export your passwords before hardware changes, system reinstalls, or major updates.
-
-**Security Notice**: The export function creates plain text files containing all passwords. Secure or delete these files immediately after use. Set file permissions to 0600 on Unix systems and store in encrypted containers.
-
-**Session Warning**: Session files contain encrypted master passwords. While encrypted and machine-bound, compromise of the session file combined with the same machine access could allow unauthorized access. Use `lock` command when leaving your system unattended.

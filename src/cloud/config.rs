@@ -230,6 +230,7 @@ impl CloudConfig {
         let encoded = Zeroizing::new(Storage::encode_value(credentials)?);
         let (crypto, kdf) = Crypto::create(passphrase)?;
         let (ciphertext, nonce) = crypto.seal_blob(&encoded)?;
+
         Ok(Storage::encode_value(&SealedCredentials {
             kdf,
             nonce,
@@ -244,6 +245,7 @@ impl CloudConfig {
         let sealed = Self::parse_sealed(sealed_bytes)?;
         let plaintext = Self::open_sealed(&sealed, passphrase)?;
         let decoded: CloudCredentials = Storage::decode_value(&plaintext)?;
+
         Ok(decoded)
     }
 
@@ -267,6 +269,7 @@ impl CloudConfig {
 
         let passphrase = prompt_new_cloud_passphrase()?;
         let sealed = Self::seal_credentials(credentials, &passphrase)?;
+
         Self::delete_keyring_secret(name);
         Ok((Some(sealed), CredentialStorage::Passphrase))
     }
@@ -285,6 +288,7 @@ impl CloudConfig {
         let plaintext = crypto
             .open_blob(&sealed.nonce, &sealed.ciphertext)
             .map_err(|_| FALLBACK_DECRYPT_ERROR)?;
+
         Ok(Zeroizing::new(plaintext))
     }
 
@@ -320,6 +324,7 @@ fn prompt_cloud_passphrase() -> Result<Zeroizing<String>, Box<dyn std::error::Er
 fn prompt_new_cloud_passphrase() -> Result<Zeroizing<String>, Box<dyn std::error::Error>> {
     let passphrase = UserPrompt::password(NEW_CLOUD_PASSPHRASE_PROMPT)?;
     Password::security_check(&passphrase)?;
+
     let confirmation = UserPrompt::password(CONFIRM_CLOUD_PASSPHRASE_PROMPT)?;
     Password::match_check(&passphrase, &confirmation)?;
     Ok(passphrase)

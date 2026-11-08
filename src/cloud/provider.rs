@@ -179,6 +179,7 @@ impl ProviderSettings {
     #[must_use]
     pub fn nextcloud_dav_endpoint(base_url: &str, username: &str) -> String {
         let trimmed = base_url.trim().trim_end_matches('/');
+
         if trimmed.contains("/remote.php/dav") || trimmed.contains("/remote.php/webdav") {
             trimmed.to_string()
         } else {
@@ -202,6 +203,7 @@ impl CloudCredentials {
     #[must_use]
     pub fn with_token(token: String) -> Self {
         let mut creds = Self::default();
+
         creds.token = Some(token);
         creds
     }
@@ -249,21 +251,27 @@ impl Drop for CloudCredentials {
         if let Some(value) = self.token.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.refresh_token.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.client_id.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.client_secret.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.access_key.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.secret_key.as_mut() {
             value.zeroize();
         }
+
         if let Some(value) = self.password.as_mut() {
             value.zeroize();
         }

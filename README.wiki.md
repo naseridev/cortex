@@ -1,657 +1,365 @@
 # Cortex Password Manager - User Guide
 
-Complete guide for using Cortex Password Manager with detailed examples and troubleshooting.
+This guide covers everyday commands, configuration options, and cloud synchronization workflows for Cortex v4.0.0.
 
 ## Table of Contents
 
-- [Usage](#usage)
-  - [Database Initialization](#database-initialization)
-  - [Creating Password Entries](#creating-password-entries)
+- [Core Concepts](#core-concepts)
+- [Account Management](#account-management)
+  - [Creating Accounts](#creating-accounts)
+  - [Listing Accounts](#listing-accounts)
+  - [Switching Accounts](#switching-accounts)
+  - [Renaming Accounts](#renaming-accounts)
+  - [Resetting Master Passwords](#resetting-master-passwords)
+  - [Deleting Accounts](#deleting-accounts)
+  - [Dumping and Restoring Vaults](#dumping-and-restoring-vaults)
+  - [Exporting and Importing CSVs](#exporting-and-importing-csvs)
+- [Vault Operations](#vault-operations)
+  - [Adding Entries](#adding-entries)
   - [Retrieving Passwords](#retrieving-passwords)
-  - [Listing Entries](#listing-entries)
   - [Editing Entries](#editing-entries)
   - [Deleting Entries](#deleting-entries)
+  - [Listing Entries](#listing-entries)
   - [Searching Entries](#searching-entries)
-  - [Tag Management](#tag-management)
-  - [Password Generation](#password-generation)
-  - [Export Database](#export-database)
-  - [Import Database](#import-database)
-  - [Master Password Management](#master-password-management)
-  - [Session Management](#session-management)
-  - [Database Destruction](#database-destruction)
-- [Common Error Scenarios](#common-error-scenarios)
-- [Security Considerations](#security-considerations)
-- [Password Security Requirements](#password-security-requirements)
-- [Technical Specifications](#technical-specifications)
+  - [Managing Tags](#managing-tags)
+  - [Locking Sessions](#locking-sessions)
+- [Password Generation](#password-generation)
+- [Cloud Synchronization](#cloud-synchronization)
+  - [Supported Providers](#supported-providers)
+  - [Setting Up Remotes](#setting-up-remotes)
+  - [Pushing to Cloud](#pushing-to-cloud)
+  - [Pulling from Cloud](#pulling-from-cloud)
+  - [Two-Way Sync](#two-way-sync)
+  - [Managing Remotes](#managing-remotes)
+- [Security Specifications](#security-specifications)
 - [Command Reference](#command-reference)
 - [Troubleshooting](#troubleshooting)
-- [Best Practices](#best-practices)
 
-## Usage
+---
 
-### Database Initialization
+## Core Concepts
+
+* **Accounts**: Every account is an independent database file. Each has its own master password, Argon2id salt, and integrity records.
+* **Active Account**: One account is marked active at a time. Commands default to this account unless you pass an explicit account flag.
+* **Session Cache**: When you unlock your vault, Cortex saves the derived key in your operating system keyring for 8 minutes (480 seconds). Subsequent commands reuse this key without prompting.
+* **Integrity Manifest**: A BLAKE3 hash covers every key and value in the database. If a file gets corrupted, tampered with, or rolled back, Cortex stops execution to prevent loading unsafe data.
+
+---
+
+## Account Management
+
+### Creating Accounts
 ```bash
-cortex init
+cortex account create
+cortex account create personal
 ```
-**Prompts:**
-- Master password: [hidden - min 8 chars with complexity requirements]
-- Confirm password: [hidden]
+Creates a new vault database. You will be prompted for a master password. It must be at least 8 characters long and contain uppercase, lowercase, numbers, and special characters.
 
-**Output:** `Initialized.`
-
-**Security Notes:**
-- Master password requirements enforced
-- Database and salt created in secure directory
-- Initial backup created automatically
-- File permissions set to 0700 (Unix)
-
-### Creating Password Entries
-
-**Basic creation:**
+### Listing Accounts
 ```bash
-cortex create "github-work"
+cortex account list
 ```
+Prints all registered accounts on this system. The active account has an asterisk next to it.
 
-**With tags:**
+### Switching Accounts
 ```bash
-cortex create "github-work" --tags "work,dev,critical"
+cortex account switch work
 ```
+Changes the default account for subsequent vault and sync operations. It also clears any active session keys from the keyring.
 
-**Prompts:**
-- Master password: [hidden or cached session]
-- Password to store: [hidden - min 4 chars]
-- Confirm password: [hidden]
-- Description (optional): [max 500 chars]
+### Renaming Accounts
+```bash
+cortex account edit
+cortex account edit current_name new_name
+```
+Renames an existing account, moves the database file safely, and updates internal registry entries.
 
-**Output:** `Created 'github-work'.` and `Tags: work, dev, critical`
+### Resetting Master Passwords
+```bash
+cortex account reset
+cortex account reset personal
+```
+Prompts for your old password, asks for a new password, and re-encrypts every entry, description, and tag set in that account. Existing binary dumps created earlier will still need the master password that was active when they were made.
 
-**Validation:**
-- Name cannot start with `__` (reserved prefix)
-- Password minimum 4 characters
-- Description cannot contain password fragments
-- Description maximum 500 characters
-- Tags normalized (lowercase, sorted, deduplicated)
+### Deleting Accounts
+```bash
+cortex account delete personal
+```
+Prompts for your master password and asks you to solve a short math problem to confirm. Once confirmed, it deletes the database file permanently.
+
+### Dumping and Restoring Vaults
+
+**Creating an encrypted dump:**
+```bash
+cortex account dump
+```
+Creates an encrypted file named `dump_<timestamp>.bin` in your current working directory.
+
+**Restoring from a dump:**
+```bash
+cortex account restore dump_00000000000000000001.bin
+```
+Replaces the active database with the contents of the dump file. You need to enter the master password that was used when creating that specific dump.
+
+### Exporting and Importing CSVs
+
+**Exporting to plaintext CSV:**
+```bash
+cortex account export
+```
+Prompts for authentication and warns you that passwords will be written in plain text. The exported file (`cortex_export_<random>.csv`) is created with owner-only read permissions (`0600` on Unix).
+
+**Importing entries:**
+```bash
+cortex account import backup.csv
+cortex account import backup.csv --overwrite
+```
+Reads a CSV file, checks that all entries meet character and length requirements, and writes them to the current account. Existing entries are skipped unless you include the `--overwrite` flag.
+
+---
+
+## Vault Operations
+
+### Adding Entries
+```bash
+cortex vault create "github"
+cortex vault create "aws-console" --tags "work,cloud,devops"
+```
+Prompts:
+1. Password to store (visible input so you can verify what you type, followed by confirmation)
+2. Optional description (up to 500 characters)
+
+Cortex verifies that descriptions do not accidentally contain parts of the password you are storing.
 
 ### Retrieving Passwords
-
-**Display in terminal:**
 ```bash
-cortex get "github-work"
-```
+# Copies password to clipboard and wipes it after 60 seconds:
+cortex vault get "github"
 
-**Output:**
-```
-github-work: your_secure_password_123
-Description: Work GitHub account for project X
-```
-
-### Listing Entries
-
-**Basic list:**
-```bash
-cortex list
-```
-
-**With tags (deprecated flag, tags always shown):**
-```bash
-cortex list --tags
-```
-
-**Output:**
-```
-Entry: github-work
-Description: Work GitHub account for project X
-Tags: work, dev, critical
-
-Entry: aws-prod
-Description: Production AWS credentials
-Tags: cloud, production
+# Prints password directly to terminal:
+cortex vault get "github" --show
 ```
 
 ### Editing Entries
-
-**Edit password and description:**
 ```bash
-cortex edit "github-work"
+cortex vault edit "github"
+cortex vault edit "github" --tags "work,infra"
 ```
-
-**Replace tags:**
-```bash
-cortex edit "github-work" --tags "work,dev,updated"
-```
-
-**Prompts:**
-- Master password: [hidden or cached]
-- New password (Enter to keep current): [hidden]
-- Confirm new password: [if password changed]
-- New description (Enter to keep current): [text]
-
-**Output:** `Edited for 'github-work'.` or `No changes made to 'github-work'.`
-
-**Behavior:**
-- Empty inputs keep current values
-- Tags flag replaces all existing tags
-- No-op detected automatically
+Prompts for a new password and description. Press Enter on any prompt to keep the current value. Passing `--tags` replaces all existing tags on the entry.
 
 ### Deleting Entries
 ```bash
-cortex delete "old-account"
+cortex vault delete "github"
 ```
+Deletes the entry and creates a deletion tombstone with a logical timestamp. This prevents other devices from recreating the entry during sync.
 
-**Output:** `Deleted 'old-account'.` or `Account 'old-account' not found.`
-
-**Restrictions:** Cannot delete system entries (names starting with `__`)
+### Listing Entries
+```bash
+cortex vault list
+cortex vault list --tags
+```
+Lists every entry name and description in the active account. Add `--tags` to display tags alongside each item.
 
 ### Searching Entries
-
-**Basic search:**
 ```bash
-cortex find "github"
+cortex vault find "database"
+cortex vault find "prod.*key" --ignore-case
+cortex vault find "aws" --names-only
 ```
+Runs a regex search over entry names, decrypted notes, and tags. Use `--names-only` to skip checking descriptions and tags.
 
-**Advanced search:**
+### Managing Tags
 ```bash
-cortex find "aws" --ignore-case --names-only
+cortex vault tag list
+cortex vault tag add "github" "production,vcs"
+cortex vault tag remove "github" "vcs"
 ```
+Tag guidelines:
+* Tags are converted to lowercase, trimmed, deduplicated, and sorted automatically.
+* Allowed characters: letters, numbers, hyphens, and underscores.
+* Maximum length: 30 characters per tag, up to 20 tags per entry.
 
-**Output:**
-```
-Found 2 match(es) for: github
-
-Entry: github-work
-  >> Matches: name and tags
-  Description: Work GitHub account for project X
-  Tags: work, dev, critical
-
-Entry: github-personal
-  >> Matches: description
-  Description: Personal GitHub for side projects
-  Tags: personal, dev
-```
-
-**Options:**
-- `--ignore-case, -i`: Case-insensitive matching
-- `--names-only, -n`: Search only entry names
-- Supports regex patterns (automatically escaped for literal search)
-- Shows first 20 results
-- Indicates match location (name/description/tags)
-
-### Tag Management
-
-**List all tags with counts:**
+### Locking Sessions
 ```bash
-cortex tag list
+cortex vault lock
 ```
+Deletes the cached session key from your system keyring. The next vault command will ask for your master password again.
 
-**Output:**
-```
-Tags:
-  work (5)
-  dev (4)
-  production (3)
-  personal (2)
-  critical (2)
-```
+---
 
-**Add tags to entry:**
+## Password Generation
+
 ```bash
-cortex tag add "github-work" "urgent,security"
-```
-
-**Output:** `Added 2 tag(s) to 'github-work'`
-
-**Remove tags from entry:**
-```bash
-cortex tag remove "github-work" "urgent"
-```
-
-**Output:** `Removed 1 tag(s) from 'github-work'`
-
-**Tag Rules:**
-- Maximum 20 tags per entry
-- Maximum 30 characters per tag
-- Alphanumeric, hyphens, and underscores only
-- Automatically normalized (lowercase, sorted, deduplicated)
-- Case-insensitive duplicate detection
-
-### Password Generation
-
-**Default generation (16 chars, all types):**
-```bash
+# Default: 16 characters with uppercase, lowercase, numbers, and symbols
 cortex pass
+
+# Set specific length and generate multiple passwords:
+cortex pass --length 24 --count 5
+
+# Limit character sets:
+cortex pass --length 16 --uppercase --lowercase --digits
+cortex pass --length 20 --digits --special
 ```
 
-**Custom generation:**
-```bash
-cortex pass --length 20 --count 3
-```
+Flags:
+* `-l, --length`: Password length (8 to 128)
+* `-c, --count`: How many passwords to print (1 to 50)
+* `-u, --uppercase`: Include A-Z
+* `-w, --lowercase`: Include a-z
+* `-d, --digits`: Include 0-9
+* `-s, --special`: Include punctuation and symbols
 
-**Selective character types:**
-```bash
-cortex pass --length 12 --uppercase --digits
-```
+---
 
-**Options:**
-- `--length, -l`: Password length (default: 16, min: 4, max: 128)
-- `--count, -c`: Number of passwords (default: 1, range: 1-50)
-- `--uppercase, -u`: Include uppercase letters
-- `--lowercase, -w`: Include lowercase letters
-- `--digits, -d`: Include digits
-- `--special, -s`: Include special characters (!@#$%^&*()_+-=[]{}|;:,.<>?)
+## Cloud Synchronization
 
-**Default behavior:** If no flags specified, all character types enabled
+Cortex lets you sync encrypted snapshots to remote servers or local drives. The remote server only sees encrypted data; your credentials and passwords never leave your machine in plain text.
 
-### Export Database
+### Supported Providers
 
-**Export all passwords:**
-```bash
-cortex export
-```
+| Provider | Name Flag | Required Arguments |
+|---|---|---|
+| Google Drive | `gdrive` | Access token, optional refresh token and client ID |
+| Dropbox | `dropbox` | Access token, optional refresh token and client ID |
+| OneDrive | `onedrive` | Access token, optional client ID |
+| Nextcloud | `nextcloud` | Server URL, Username, App password |
+| AWS S3 or Compatible | `s3` | Bucket, Region, Access Key ID, Secret Key, optional Endpoint |
+| Google Cloud Storage | `gcs` | Bucket, OAuth2 token, optional Endpoint |
+| Azure Blob Storage | `azblob` | Container, Storage Account, Account Key |
+| Backblaze B2 | `b2` | Bucket, Bucket ID, Application Key ID, Application Key |
+| Alibaba Cloud OSS | `oss` | Bucket, Endpoint, Access Key ID, Secret |
+| Tencent Cloud COS | `cos` | Bucket, Endpoint, Secret ID, Secret Key |
+| pCloud | `pcloud` | Endpoint URL, Username, Password |
+| Yandex Disk | `yandex` | OAuth token |
+| Koofr | `koofr` | Endpoint URL, Email, App password |
+| WebDAV | `webdav` | Server URL, Username, Password |
+| Local Directory or NAS | `local` | Directory path |
 
-**Export template:**
-```bash
-cortex export --template
-```
-
-**Process:**
-1. Master password authentication
-2. Security warning display
-3. Confirmation: "I understand this exports passwords in plain text"
-4. Export to `cortex_export_[timestamp].json`
-5. File permissions set to 0600 (Unix)
-
-**Output format (JSON):**
-```json
-{
-  "version": "3.0.0",
-  "timestamp": 1699999999,
-  "entries": [
-    {
-      "name": "github-work",
-      "password": "your_secure_password_123",
-      "description": "Work GitHub account",
-      "tags": ["work", "dev", "critical"]
-    }
-  ]
-}
-```
-
-**Template output** (`cortex_template.json`):
-```json
-{
-  "version": "3.0.0",
-  "timestamp": 1699999999,
-  "entries": [
-    {
-      "name": "heisenberg",
-      "password": "1AmTh3D4ng3r!",
-      "description": "Say my name - I am the one who knocks",
-      "tags": ["work", "critical"]
-    }
-  ]
-}
-```
-
-### Import Database
-
-**Basic import:**
-```bash
-cortex import "backup.json"
-```
-
-**Import with overwrite:**
-```bash
-cortex import "backup.json" --overwrite
-```
-
-**Process:**
-1. File validation and parsing
-2. Entry validation (names, passwords, descriptions, tags)
-3. Master password authentication
-4. Batch import with progress
-5. Automatic rollback on failure
-
-**Validation rules:**
-- Names: Non-empty, no `__` prefix
-- Passwords: Minimum 4 characters
-- Descriptions: Maximum 500 characters, no password fragments
-- Tags: Maximum 20 per entry, valid format
-
-**Output:**
-```
-Import Summary:
-  Version: 3.0.0
-  Timestamp: 1699999999
-  Total entries: 15
-
-Imported: entry1
-Imported: entry2
-Skipping 'entry3': already exists (use --overwrite to replace)
-
-Import completed:
-  Imported: 12
-  Skipped: 2
-  Failed: 1
-```
-
-**Rollback:** Automatic on errors, restores original entries
-
-### Master Password Management
-
-**Reset master password:**
-```bash
-cortex reset
-```
-
-**Process:**
-1. Current master password authentication
-2. Automatic backup creation
-3. New password with complexity validation
-4. Re-encryption of all entries with new password
-5. Verification data update
-
-**Output:** `Master password reset successfully.`
-
-**Security:** All data re-encrypted, old sessions invalidated
-
-### Session Management
-
-**View current configuration:**
-```bash
-cortex config show
-```
-
-**Output:**
-```
-Current Configuration:
-  Session timeout: 480 seconds (8 minutes)
-```
-
-**Set session timeout:**
-```bash
-cortex config set-timeout 1800
-```
-
-**Output:** `Session timeout set to 1800 seconds (30 minutes)`
-
-**Range:** 60 seconds (1 minute) to 86400 seconds (24 hours)
-
-**Clear session manually:**
-```bash
-cortex lock
-```
-
-**Output:** `Session cleared. You will need to authenticate again.`
-
-**Session behavior:**
-- Cached after first successful authentication
-- Validated on each command
-- Auto-expires after configured timeout
-- Machine-bound (cannot transfer between systems)
-- Secure file storage with 0600 permissions
-
-### Database Destruction
-```bash
-cortex purge
-```
-
-**Security verification:**
-1. Master password authentication
-2. Math puzzle: "This will permanently delete all stored passwords!"
-3. Equation example: `(47 + 23) * 3`
-4. Answer validation
-
-**Output:** `Database purged.`
-
-**Effect:** Permanent deletion of all data, backups preserved
-
-## Common Error Scenarios
+### Setting Up Remotes
 
 ```bash
-# Database already exists
-cortex init
-# Output: "Database already exists. Use a different path or remove existing database."
+# Google Drive:
+cortex cloud add gdrive --name "mydrive" --root "/cortex"
 
-# Database not initialized
-cortex list
-# Output: "Database not initialized. Use 'init' command."
+# Amazon S3:
+cortex cloud add s3 --name "backup-s3" --bucket "vault-bucket" --region "us-east-1"
 
-# Duplicate entry creation
-cortex create "existing-account"
-# Output: "Account already exists. Use 'edit' to update or choose a different name."
+# Nextcloud:
+cortex cloud add nextcloud --url "https://cloud.example.com" --username "alice"
 
-# Weak master password
-cortex init
-# Master password: weak123
-# Output: "Error: Your password needs improvement.
-#          Missing: uppercase letter, special character"
-
-# Short account password
-cortex create "test"
-# Password to store: abc
-# Output: "Error: Password must be at least 4 characters"
-
-# Password in description
-cortex create "secure-app"
-# Password: mySecretPass123
-# Description: My password is mySecretPass123
-# Output: "Error: Description cannot contain the password or parts of it."
-
-# Invalid session timeout
-cortex config set-timeout 30
-# Output: "Error: Session timeout must be at least 60 seconds (1 minute)"
-
-# Invalid tags
-cortex create "test" --tags "tag1,tag with space,tag3"
-# Output: "Error: Tags can only contain alphanumeric characters, hyphens, and underscores"
-
-# Too many tags
-cortex create "test" --tags "tag1,tag2,...,tag21"
-# Output: "Error: Maximum 20 tags allowed"
-
-# Entry not found
-cortex delete "nonexistent"
-# Output: "Account 'nonexistent' not found."
-
-# System entry protection
-cortex delete "__init__"
-# Output: "Error: Cannot delete system entries"
-
-# Empty search pattern
-cortex find ""
-# Output: "Error: Search pattern cannot be empty"
-
-# Import validation errors
-cortex import "invalid.json"
-# Output:
-# Validation errors:
-#   - entry1: Password must be at least 4 characters
-#   - entry2: Description too long
+# Local folder, external drive, or network share:
+cortex cloud add local --path "/mnt/backup/cortex" --name "nas"
 ```
 
-## Security Considerations
+Credentials are saved in your system keyring. If your system does not have a working keyring, Cortex prompts for a dedicated passphrase to seal your cloud credentials into `cloud.bin`.
 
-### Input Validation
-- **Master Password**: Min 8 chars, complexity requirements
-- **Account Password**: Min 4 chars
-- **Description**: Max 500 chars, no password fragments
-- **Tags**: Max 20 per entry, 30 chars each, valid format
-- **Search Pattern**: Max 100 chars, max 10,000 entries processed
+### Pushing to Cloud
+```bash
+cortex cloud push
+cortex cloud push --remote "backup-s3"
+cortex cloud push --force
+```
+Uploads your local vault. Cortex checks whether the remote copy changed since your last sync. If another device pushed changes in the meantime, the upload stops to avoid overwriting them. Use `--force` only if you deliberately want to overwrite the remote vault.
 
-### Session Security
-- **Encryption**: ChaCha20-Poly1305 with unique session key
-- **Machine Binding**: SHA256 hash of CPU brand
-- **Timeout**: Configurable (60s - 24h)
-- **Max Age**: Hard limit of 24 hours
-- **Failed Attempts**: Max 3 before session clear
-- **File Security**: Secure overwrite before deletion
+### Pulling from Cloud
+```bash
+cortex cloud pull
+cortex cloud pull --remote "backup-s3" --account "work"
+cortex cloud pull --overwrite
+```
+Downloads the remote vault and asks for that vault master password. It updates your local database and sync history records.
 
-### Export Security
-- **Confirmation**: Plain text warning required
-- **File Permissions**: Restricted to owner (Unix)
-- **Temporary Files**: Written to .tmp first, then renamed
-- **Error Handling**: Failed exports cleaned up
+### Two-Way Sync
+```bash
+cortex cloud sync
+cortex cloud sync --remote "backup-s3"
+```
+Reconciles changes between your local database and the cloud:
+1. Compares logical clocks and hashes on both sides.
+2. Identifies new, edited, and deleted entries.
+3. Merges changes using deterministic rules (newer modification time wins; deletions win if timestamps are equal).
+4. Commits the merged data locally and uploads the updated vault to the remote target.
 
-### Import Security
-- **Validation**: Comprehensive before any database changes
-- **Rollback**: Automatic on failure
-- **Progress**: Real-time feedback
-- **Batch Safety**: Transactional behavior
+### Managing Remotes
+```bash
+# Check sync status:
+cortex cloud status
 
-## Password Security Requirements
+# List remotes:
+cortex cloud list
 
-### Master Password
-- **Minimum**: 8 characters
-- **Complexity**: At least 3 of 4 types:
-  - Lowercase letters (a-z)
-  - Uppercase letters (A-Z)
-  - Digits (0-9)
-  - Special characters (!@#$%^&*()_+-=[]{}|;:,.<>?)
-- **Validation**: Checked during `init` and `reset`
+# Set default remote:
+cortex cloud default "backup-s3"
 
-### Account Passwords
-- **Minimum**: 4 characters
-- **Maximum**: No limit (practical limit: 128 for input)
-- **Restriction**: Cannot appear in description field
-- **Fragment Detection**: Sliding window algorithm for partial matches
+# Remove a remote and wipe its credentials:
+cortex cloud remove "backup-s3"
+```
 
-## Technical Specifications
+---
 
-### Cryptography
-- **Cipher**: ChaCha20-Poly1305
-- **Key Size**: 256 bits
-- **Nonce**: 96 bits (12 bytes), crypto-random
-- **Tag**: 128 bits (16 bytes), authenticated
-- **Hash**: BLAKE3, 256-bit output
-- **KDF**: BLAKE3^600000(password || salt || hardware_id)
-- **Session KDF**: BLAKE3^300000(hardware || constant || salt)
+## Security Specifications
 
-### Storage
-- **Engine**: Sled embedded key-value store
-- **Format**: Binary (bincode serialization)
-- **System Entries**: Prefixed with `__`
-  - `__init__`: Verification data
-  - `__salt__`: 32-byte master salt
-  - `__config__`: Serialized configuration
-- **Backup Retention**: Last 5 backups
+* **Key Derivation**: Argon2id version 0x13 (64 MiB memory, 3 iterations, 1 lane).
+* **Encryption**: ChaCha20-Poly1305 AEAD.
+* **Nonces**: 96-bit (12-byte) cryptographically secure random values generated from OS entropy for every field.
+* **Integrity**: BLAKE3 keyed hash covering all entries, tombstones, and logical clock records under the `__manifest__` entry.
+* **File Obfuscation**: Account database files use the BLAKE3 hex digest of the account name as their filename (`<blake3_hex>.redb`).
+* **Permissions**:
+  * Unix: `0700` for directories, `0600` for files.
+  * Windows: Restricted to the active user account via `icacls`.
+* **Session Lifetime**: 8 minutes (480 seconds) from last unlock.
 
-### Limits
-- **Password Length**: 4-128 characters (input), unlimited (storage)
-- **Description**: 500 characters
-- **Tags**: 20 per entry, 30 characters each
-- **Search Pattern**: 100 characters
-- **Search Results**: First 20 displayed
-- **Search Processing**: Max 10,000 entries
-- **Session Timeout**: 60 seconds to 24 hours
-- **Max Session Age**: 24 hours (hard limit)
-- **Password Generation**: 4-128 characters, 1-50 count
-- **Import Batch**: Unlimited with validation
-
-### Performance
-- **KDF Speed**: ~300ms for 600,000 iterations (varies by CPU)
-- **Session KDF**: ~150ms for 300,000 iterations
-- **Encryption**: < 1ms per entry
-- **Database**: O(log n) lookups
-- **Search**: O(n) with early termination
-- **Export**: Buffered writes (64KB buffer), 1000-entry progress
+---
 
 ## Command Reference
 
-| Command | Purpose | Required Args | Optional Args |
-|---------|---------|---------------|---------------|
-| `init` | Initialize database | None | None |
-| `create <name>` | Create entry | name | --tags \<tags\> |
-| `get <name>` | Retrieve entry | name | None |
-| `list` | List all entries | None | --tags (deprecated) |
-| `delete <name>` | Delete entry | name | None |
-| `edit <name>` | Edit entry | name | --tags \<tags\> |
-| `find <pattern>` | Search entries | pattern | -i, -n |
-| `tag list` | List all tags | None | None |
-| `tag add <name> <tags>` | Add tags | name, tags | None |
-| `tag remove <name> <tags>` | Remove tags | name, tags | None |
-| `pass` | Generate passwords | None | -l, -c, -u, -w, -d, -s |
-| `export` | Export database | None | --template |
-| `import <file>` | Import from JSON | file | --overwrite |
-| `reset` | Change master password | None | None |
-| `config show` | Show configuration | None | None |
-| `config set-timeout <sec>` | Set session timeout | seconds | None |
-| `lock` | Clear session | None | None |
-| `purge` | Destroy database | None | None |
+| Section | Command | Action |
+|---|---|---|
+| `account` | `create [name]` | Initialize a new account |
+| `account` | `list` | Print all registered accounts |
+| `account` | `switch [name]` | Set the default active account |
+| `account` | `edit [name] [new_name]` | Rename an account |
+| `account` | `delete [name]` | Remove an account and delete its file |
+| `account` | `reset [name]` | Change master password and re-encrypt vault |
+| `account` | `export` | Export entries to unencrypted CSV |
+| `account` | `import <file> [--overwrite]` | Import entries from CSV |
+| `account` | `dump` | Write an encrypted binary snapshot |
+| `account` | `restore <file>` | Restore from an encrypted binary snapshot |
+| `vault` | `create <name> [-t tags]` | Store a new password |
+| `vault` | `get <name> [--show]` | Copy password to clipboard or print to terminal |
+| `vault` | `edit <name> [-t tags]` | Update an existing password, note, or tag set |
+| `vault` | `delete <name>` | Delete an entry and record a tombstone |
+| `vault` | `list [-t]` | Display stored entries |
+| `vault` | `find <pattern> [-i] [-n]` | Regex search over names, notes, and tags |
+| `vault` | `tag list` | Print all tags with entry counts |
+| `vault` | `tag add <name> <tags>` | Add comma-separated tags to an entry |
+| `vault` | `tag remove <name> <tags>` | Remove tags from an entry |
+| `vault` | `lock` | Clear session key from OS keyring |
+| `cloud` | `add <provider>` | Add and configure a cloud storage remote |
+| `cloud` | `sync [-r remote] [-a account]` | Two-way merge with a cloud remote |
+| `cloud` | `push [-r remote] [-a account] [-f]` | Upload vault to a cloud remote |
+| `cloud` | `pull [-r remote] [-a account] [-o]` | Download vault from a cloud remote |
+| `cloud` | `list` | Show configured cloud remotes |
+| `cloud` | `status [-r remote] [-a account]` | Check synchronization status |
+| `cloud` | `default <name>` | Choose default cloud remote |
+| `cloud` | `remove <name>` | Delete remote and clear stored credentials |
+| `pass` | `pass [-l len] [-c count] [-u] [-w] [-d] [-s]` | Generate random passwords |
+
+---
 
 ## Troubleshooting
 
-### Session Issues
-**Problem**: "Authentication failed" despite correct password
-**Solution**: Clear session and try again
-```bash
-cortex lock
-cortex list
-```
+### Database Integrity Check Failed
+**Message:** `Database integrity check failed. Stored data was modified, replaced or removed outside of cortex.`
+**Cause:** The database file was edited externally, corrupted on disk, or partially overwritten.
+**Solution:** Restore your database from your most recent binary dump using `cortex account restore <dump_file.bin>`.
 
-**Problem**: Session expires too quickly
-**Solution**: Increase timeout
-```bash
-cortex config set-timeout 3600  # 1 hour
-```
+### Repeated Password Prompts
+**Issue:** Cortex asks for your master password on every single command instead of using session caching.
+**Cause:** Your desktop session does not have an unlocked secret service or keychain daemon (common in headless SSH sessions or minimal window managers).
+**Solution:** Run `cortex vault lock` to reset the session state, or unlock your keyring daemon (such as `gnome-keyring` or `kwallet`) when logging in.
 
-### Hardware Issues
-**Problem**: "Decryption failed" after hardware change
-**Solution**: Export from backup, reinitialize, and import
-```bash
-# On old system:
-cortex export
-
-# On new system:
-cortex init
-cortex import cortex_export_[timestamp].json
-```
-
-### Import Errors
-**Problem**: Import validation errors
-**Solution**: Review JSON format and validation rules
-```bash
-# Generate template for reference
-cortex export --template
-
-# Check validation errors in output
-cortex import file.json
-```
-
-### Permission Issues
-**Problem**: "Permission denied" on Unix
-**Solution**: Check file permissions
-```bash
-chmod 700 ~/.config/cortex
-chmod 600 ~/.config/cortex/.password-store/*
-```
-
-## Best Practices
-
-### Master Password
-- Use a unique, strong passphrase
-- Never store in plain text
-- Use password manager for backup (not Cortex itself)
-- Change periodically with `reset` command
-
-### Session Management
-- Set appropriate timeout for your workflow
-- Use `lock` when leaving workstation
-- Shorter timeouts for shared systems
-- Longer timeouts for personal, secure systems
-
-### Organization
-- Use descriptive entry names
-- Add meaningful descriptions
-- Tag entries consistently
-- Create tag hierarchy: `work-dev`, `work-prod`, `personal-email`
-
-### Backups
-- Export regularly to encrypted external storage
-- Test import process periodically
-- Keep backups on separate media
-- Automate with scripts if needed
-
-### Security
-- Don't share export files
-- Secure export files immediately (encrypt or delete)
-- Use `purge` to completely remove database
+### Clock Skew Warning During Sync
+**Message:** `Warning: remote holds timestamps X seconds ahead of this device's clock.`
+**Cause:** Two devices syncing the same vault have system clocks that are out of sync by more than five minutes.
+**Solution:** Enable NTP time synchronization on each computer to keep their clocks aligned.

@@ -4,8 +4,8 @@ version = "4.0.0"
 edition = "2024"
 rust-version = "1.90"
 authors = ["Nima Naseri <nerdnull@proton.me>"]
-description = "A secure password manager with Argon2id key derivation and authenticated encryption"
-publish = false
+description = "A no-nonsense password manager"
+publish = true
 
 [dependencies]
 argon2 = "0.6"

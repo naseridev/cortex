@@ -298,7 +298,7 @@ jobs:
         run: |
           pacman-key --init
           pacman-key --populate archlinux
-          pacman -Syu --noconfirm --needed base-devel git
+          pacman -Syu --noconfirm --needed base-devel git dbus libxcb
           useradd --create-home builder
 
       - uses: actions/checkout@v4

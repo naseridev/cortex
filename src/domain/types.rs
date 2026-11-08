@@ -1,4 +1,4 @@
-use crate::core::limits::MAX_ENTRIES;
+use crate::domain::limits::MAX_ENTRIES;
 use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::fmt;

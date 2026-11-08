@@ -1,6 +1,6 @@
 use crate::support::sample_entry;
 use cortex::cloud::engine::{CLOCK_SKEW_TOLERANCE_SECS, ClockSkew, SyncEngine, SyncState};
-use cortex::core::crypto::Crypto;
+use cortex::security::crypto::Crypto;
 
 use crate::common::TestResult;
 

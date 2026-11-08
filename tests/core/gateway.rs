@@ -1,5 +1,5 @@
-use cortex::core::gateway::Gateway;
-use cortex::core::limits::{THROTTLE_FREE_FAILURES, THROTTLE_MAX_DELAY_SECONDS};
+use cortex::domain::limits::{THROTTLE_FREE_FAILURES, THROTTLE_MAX_DELAY_SECONDS};
+use cortex::security::gateway::Gateway;
 
 #[test]
 fn throttle_allows_initial_free_attempts() {

@@ -1,5 +1,6 @@
 use crate::{
-    core::{gateway::Gateway, types::SecretText, validation::Validation},
+    domain::{types::SecretText, validation::Validation},
+    security::gateway::Gateway,
     ui::clipboard::PasswordClipboard,
 };
 use zeroize::Zeroizing;

@@ -1,4 +1,4 @@
-use crate::core::{platform::Platform, storage::Storage};
+use crate::{storage::Storage, system::platform::Platform};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;

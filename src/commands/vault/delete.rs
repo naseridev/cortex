@@ -1,5 +1,4 @@
-use crate::core::gateway::Gateway;
-use crate::core::validation::Validation;
+use crate::{domain::validation::Validation, security::gateway::Gateway};
 
 pub fn execute(name: &str) -> Result<(), Box<dyn std::error::Error>> {
     if Validation::is_reserved_or_blank(name) {

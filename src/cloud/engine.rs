@@ -1,12 +1,8 @@
 use crate::{
-    core::{
-        crypto::Crypto,
-        integrity::Integrity,
-        snapshot::Snapshot,
-        storage::Storage,
-        types::{PasswordEntry, SecretText},
-    },
+    domain::types::{PasswordEntry, SecretText},
     formats::dump::Dump,
+    security::crypto::Crypto,
+    storage::{Storage, integrity::Integrity, snapshot::Snapshot},
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};

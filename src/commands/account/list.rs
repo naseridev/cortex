@@ -1,10 +1,13 @@
-use crate::core::{accounts::Accounts, validation::Validation};
+use crate::{
+    domain::validation::Validation,
+    storage::accounts::{Accounts, NO_ACCOUNTS},
+};
 
 pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let (accounts, active) = Accounts::list()?;
 
     if accounts.is_empty() {
-        println!("{}", crate::core::accounts::NO_ACCOUNTS);
+        println!("{NO_ACCOUNTS}");
         return Ok(());
     }
 

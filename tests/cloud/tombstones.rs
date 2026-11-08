@@ -1,6 +1,6 @@
 use crate::support::sample_entry;
 use cortex::cloud::engine::{MergeReport, SyncEngine, SyncState, SyncStatus};
-use cortex::core::{crypto::Crypto, types::PasswordEntry};
+use cortex::{domain::types::PasswordEntry, security::crypto::Crypto};
 
 use crate::common::TestResult;
 

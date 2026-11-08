@@ -1,4 +1,4 @@
-use crate::core::limits::MAX_INPUT_LINE_BYTES;
+use crate::domain::limits::MAX_INPUT_LINE_BYTES;
 use std::io::{self, BufRead, Read, Write};
 use zeroize::{Zeroize, Zeroizing};
 

@@ -1,4 +1,4 @@
-use cortex::core::tags::TagValidator;
+use cortex::domain::tags::TagValidator;
 
 use crate::common::TestResult;
 

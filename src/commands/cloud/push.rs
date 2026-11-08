@@ -5,7 +5,8 @@ use crate::{
         config::{CloudConfig, SyncRecord},
         engine::SyncEngine,
     },
-    core::{gateway::Gateway, time::Time},
+    security::gateway::Gateway,
+    system::time::Time,
 };
 
 pub fn execute(

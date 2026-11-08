@@ -1,13 +1,14 @@
-use crate::core::{
-    crypto::Crypto,
-    limits::{
-        MAX_DESCRIPTION_BYTES, MAX_ENTRIES, MAX_NAME_BYTES, MAX_PASSWORD_BYTES,
-        MIN_ACCOUNT_PASSWORD_LENGTH,
+use crate::{
+    domain::{
+        limits::{
+            MAX_DESCRIPTION_BYTES, MAX_ENTRIES, MAX_NAME_BYTES, MAX_PASSWORD_BYTES,
+            MIN_ACCOUNT_PASSWORD_LENGTH,
+        },
+        tags::TagValidator,
+        types::{EncryptedExport, ExportData, ExportEntry},
+        validation::Validation,
     },
-    password::Password,
-    tags::TagValidator,
-    types::{EncryptedExport, ExportData, ExportEntry},
-    validation::Validation,
+    security::{crypto::Crypto, password::Password},
 };
 use zeroize::{Zeroize, Zeroizing};
 

@@ -1,5 +1,5 @@
 use super::resolve_existing;
-use crate::core::{accounts::Accounts, session::Session};
+use crate::{security::session::Session, storage::accounts::Accounts};
 
 pub fn execute(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     let account_name = resolve_existing(name, "Account name: ")?;

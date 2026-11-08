@@ -1,13 +1,12 @@
 use crate::{
-    core::{
-        crypto::Crypto,
-        gateway::Gateway,
+    domain::{
         limits::MAX_ENTRIES,
-        platform::Platform,
-        storage::Storage,
         types::{ExportEntry, PasswordEntry, SecretText},
     },
     formats::interchange::Interchange,
+    security::{crypto::Crypto, gateway::Gateway},
+    storage::Storage,
+    system::platform::Platform,
     ui::confirm::Confirmation,
 };
 use rand::RngExt;

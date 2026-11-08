@@ -1,6 +1,7 @@
 use super::resolve_existing;
 use crate::{
-    core::{accounts::Accounts, gateway::Gateway, session::Session},
+    security::{gateway::Gateway, session::Session},
+    storage::accounts::Accounts,
     ui::confirm::Confirmation,
 };
 

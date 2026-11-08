@@ -1,4 +1,4 @@
-use cortex::core::password::{Password, PasswordCharset};
+use cortex::security::password::{Password, PasswordCharset};
 
 use crate::common::{TestResult, failure};
 

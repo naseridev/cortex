@@ -1,4 +1,4 @@
-use crate::core::session::Session;
+use crate::security::session::Session;
 
 pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
     Session::clear_session()?;

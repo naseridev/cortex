@@ -1,13 +1,14 @@
 use crate::{
-    core::{
-        accounts::{Accounts, NO_ACCOUNTS},
-        crypto::Crypto,
+    domain::{
         limits::{
             MAX_PASSWORD_ATTEMPTS_PER_RUN, THROTTLE_FREE_FAILURES, THROTTLE_MAX_DELAY_SECONDS,
         },
-        session::Session,
-        storage::Storage,
         validation::Validation,
+    },
+    security::{crypto::Crypto, session::Session},
+    storage::{
+        Storage,
+        accounts::{Accounts, NO_ACCOUNTS},
     },
     ui::prompt::UserPrompt,
 };

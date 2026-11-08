@@ -1,4 +1,4 @@
-use crate::core::gateway::Gateway;
+use crate::security::gateway::Gateway;
 use std::collections::HashMap;
 
 pub fn execute() -> Result<(), Box<dyn std::error::Error>> {

@@ -5,11 +5,10 @@ use crate::{
         config::{CloudConfig, CloudRemote, SyncRecord},
         engine::{ClockSkew, MergeReport, SyncEngine, SyncState, SyncStatus},
     },
-    core::{
-        accounts::Accounts, crypto::Crypto, gateway::Gateway, session::Session, storage::Storage,
-        time::Time,
-    },
     formats::dump::Dump,
+    security::{crypto::Crypto, gateway::Gateway, session::Session},
+    storage::{Snapshot, Storage, accounts::Accounts},
+    system::time::Time,
     ui::prompt::UserPrompt,
 };
 
@@ -220,7 +219,7 @@ fn handle_remote_ahead_same_key(
     remote: &CloudRemote,
     account_name: &str,
     storage: &Storage,
-    remote_snapshot: &crate::core::storage::Snapshot,
+    remote_snapshot: &Snapshot,
     remote_hash: [u8; 32],
     remote_entries_len: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {

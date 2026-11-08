@@ -7,10 +7,7 @@ pub mod remove;
 pub mod status;
 pub mod sync;
 
-use crate::{
-    core::{accounts::Accounts, validation::Validation},
-    ui::cli::CloudAction,
-};
+use crate::{domain::validation::Validation, storage::accounts::Accounts, ui::cli::CloudAction};
 
 pub fn run(action: CloudAction) -> Result<(), Box<dyn std::error::Error>> {
     match action {

@@ -1,6 +1,6 @@
-use crate::core::{
-    limits::MIN_ACCOUNT_PASSWORD_LENGTH,
-    password::{Password, PasswordCharset},
+use crate::{
+    domain::limits::MIN_ACCOUNT_PASSWORD_LENGTH,
+    security::password::{Password, PasswordCharset},
 };
 use zeroize::Zeroizing;
 

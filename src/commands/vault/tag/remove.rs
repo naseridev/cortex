@@ -1,5 +1,5 @@
 use super::{load_entry, rewrite_entry};
-use crate::core::{gateway::Gateway, validation::Validation};
+use crate::{domain::validation::Validation, security::gateway::Gateway};
 use std::collections::HashSet;
 
 pub fn execute(name: &str, tags: &[String]) -> Result<(), Box<dyn std::error::Error>> {

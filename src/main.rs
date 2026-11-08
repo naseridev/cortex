@@ -1,7 +1,7 @@
 use clap::Parser;
 use cortex::{
     commands::{account, cloud, pass, vault},
-    core::password::PasswordCharset,
+    security::password::PasswordCharset,
     ui::cli::{Cli, Commands},
 };
 use std::process::ExitCode;

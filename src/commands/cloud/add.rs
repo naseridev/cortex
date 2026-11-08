@@ -3,7 +3,7 @@ use crate::{
         config::{CloudConfig, CredentialStorage},
         provider::{CloudCredentials, ProviderSettings},
     },
-    core::validation::Validation,
+    domain::validation::Validation,
     ui::{cli::CloudProvider, prompt::UserPrompt},
 };
 

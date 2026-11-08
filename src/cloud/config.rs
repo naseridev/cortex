@@ -1,9 +1,8 @@
 use crate::{
     cloud::provider::{CloudCredentials, ProviderSettings},
-    core::{
-        accounts::Accounts, crypto::Crypto, password::Password, storage::Storage,
-        validation::Validation,
-    },
+    domain::validation::Validation,
+    security::{crypto::Crypto, password::Password},
+    storage::{Storage, accounts::Accounts},
     ui::prompt::UserPrompt,
 };
 use keyring::Entry;

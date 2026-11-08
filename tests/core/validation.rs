@@ -1,7 +1,7 @@
-use cortex::core::crypto::Crypto;
-use cortex::core::limits::MAX_NAME_BYTES;
-use cortex::core::storage::Storage;
-use cortex::core::validation::Validation;
+use cortex::domain::limits::MAX_NAME_BYTES;
+use cortex::domain::validation::Validation;
+use cortex::security::crypto::Crypto;
+use cortex::storage::Storage;
 use tempfile::TempDir;
 
 use crate::common::{TestResult, failure};

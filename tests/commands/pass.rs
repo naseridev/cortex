@@ -1,6 +1,6 @@
 use cortex::commands::pass::execute;
-use cortex::core::limits::MIN_ACCOUNT_PASSWORD_LENGTH;
-use cortex::core::password::PasswordCharset;
+use cortex::domain::limits::MIN_ACCOUNT_PASSWORD_LENGTH;
+use cortex::security::password::PasswordCharset;
 
 use crate::common::{TestResult, failure};
 

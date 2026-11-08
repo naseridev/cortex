@@ -1,5 +1,4 @@
-use crate::core::gateway::Gateway;
-use crate::core::validation::Validation;
+use crate::{domain::validation::Validation, security::gateway::Gateway};
 
 pub fn execute(show_tags: bool) -> Result<(), Box<dyn std::error::Error>> {
     let (storage, crypto) = Gateway::login_with_session()?;

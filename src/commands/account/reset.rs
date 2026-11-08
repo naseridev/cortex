@@ -1,13 +1,8 @@
 use super::resolve_existing;
 use crate::{
-    core::{
-        accounts::Accounts,
-        crypto::Crypto,
-        gateway::Gateway,
-        password::Password,
-        session::Session,
-        types::{PasswordEntry, SecretText},
-    },
+    domain::types::{PasswordEntry, SecretText},
+    security::{crypto::Crypto, gateway::Gateway, password::Password, session::Session},
+    storage::accounts::Accounts,
     ui::prompt::UserPrompt,
 };
 use zeroize::{Zeroize, Zeroizing};

@@ -1,11 +1,12 @@
 use crate::{
-    core::{
-        crypto::Crypto,
-        integrity::{Integrity, MANIFEST_KEY, Records},
-        platform::Platform,
-        storage::{INIT_MARKER, SALT_KEY, Storage},
-    },
     formats::dump::{Dump, DumpFile},
+    security::crypto::Crypto,
+    storage::{
+        Storage,
+        engine::{INIT_MARKER, SALT_KEY},
+        integrity::{Integrity, MANIFEST_KEY, Records},
+    },
+    system::platform::Platform,
 };
 use std::fs;
 use std::io::Write;

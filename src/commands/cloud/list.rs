@@ -1,4 +1,4 @@
-use crate::{cloud::config::CloudConfig, core::validation::Validation};
+use crate::{cloud::config::CloudConfig, domain::validation::Validation};
 
 pub fn execute() -> Result<(), Box<dyn std::error::Error>> {
     let config = CloudConfig::load()?;

@@ -1,15 +1,14 @@
 use crate::{
-    core::{
-        crypto::Crypto, gateway::Gateway, limits::MAX_DUMP_BYTES, session::Session,
-        storage::Storage, validation::Validation,
-    },
+    domain::{limits::MAX_DUMP_BYTES, validation::Validation},
     formats::dump::Dump,
+    security::{crypto::Crypto, gateway::Gateway, session::Session},
+    storage::{Storage, accounts::NO_ACCOUNTS},
     ui::{confirm::Confirmation, prompt::UserPrompt},
 };
 use std::{fs, path::Path};
 
 pub fn execute(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    Validation::storage_probe(true, crate::core::accounts::NO_ACCOUNTS)?;
+    Validation::storage_probe(true, NO_ACCOUNTS)?;
 
     let path = Path::new(file_path);
     let size = fs::metadata(path)

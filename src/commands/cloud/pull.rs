@@ -5,11 +5,10 @@ use crate::{
         config::{CloudConfig, SyncRecord},
         engine::SyncEngine,
     },
-    core::{
-        accounts::Accounts, crypto::Crypto, gateway::Gateway, session::Session, storage::Storage,
-        time::Time,
-    },
     formats::dump::Dump,
+    security::{crypto::Crypto, gateway::Gateway, session::Session},
+    storage::{Storage, accounts::Accounts},
+    system::time::Time,
     ui::{confirm::Confirmation, prompt::UserPrompt},
 };
 

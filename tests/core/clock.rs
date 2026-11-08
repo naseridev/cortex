@@ -1,7 +1,7 @@
-use cortex::core::crypto::Crypto;
-use cortex::core::storage::Storage;
-use cortex::core::types::PasswordEntry;
+use cortex::domain::types::PasswordEntry;
 use cortex::formats::dump::Dump;
+use cortex::security::crypto::Crypto;
+use cortex::storage::Storage;
 use tempfile::TempDir;
 
 use crate::common::{TestResult, failure};

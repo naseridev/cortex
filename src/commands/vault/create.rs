@@ -1,11 +1,10 @@
 use crate::{
-    core::{
-        gateway::Gateway,
+    domain::{
         limits::{MAX_DESCRIPTION_BYTES, MIN_ACCOUNT_PASSWORD_LENGTH},
-        password::Password,
         tags::TagValidator,
         validation::Validation,
     },
+    security::{gateway::Gateway, password::Password},
     ui::prompt::UserPrompt,
 };
 use zeroize::Zeroizing;

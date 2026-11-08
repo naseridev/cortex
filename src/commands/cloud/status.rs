@@ -1,7 +1,7 @@
 use super::resolve_account;
 use crate::{
     cloud::{client::CloudClient, config::CloudConfig, engine::SyncEngine},
-    core::accounts::Accounts,
+    storage::accounts::Accounts,
 };
 
 pub fn execute(

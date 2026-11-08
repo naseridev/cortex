@@ -1,5 +1,5 @@
 use cortex::commands::account::reset::{PlainEntry, decrypt_all, reencrypt_all};
-use cortex::core::crypto::Crypto;
+use cortex::security::crypto::Crypto;
 
 use crate::common::TestResult;
 

@@ -1,5 +1,5 @@
-use crate::core::{
-    limits::MAX_NAME_BYTES,
+use crate::{
+    domain::limits::MAX_NAME_BYTES,
     storage::{RESERVED_PREFIX, Storage},
 };
 

@@ -1,5 +1,7 @@
-use crate::core::time::Time;
-use crate::core::types::{PasswordEntry, SecretText};
+use crate::{
+    domain::types::{PasswordEntry, SecretText},
+    system::time::Time,
+};
 use argon2::{Algorithm, Argon2, Params, Version};
 use blake3::Hasher;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce, aead::Aead, aead::Payload};

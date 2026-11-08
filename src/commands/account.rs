@@ -10,10 +10,8 @@ pub mod restore;
 pub mod switch;
 
 use crate::{
-    core::{
-        accounts::{Accounts, NO_ACCOUNTS},
-        validation::Validation,
-    },
+    domain::validation::Validation,
+    storage::accounts::{Accounts, NO_ACCOUNTS},
     ui::{cli::AccountAction, prompt::UserPrompt},
 };
 

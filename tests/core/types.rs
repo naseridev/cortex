@@ -1,5 +1,5 @@
-use cortex::core::limits::MAX_ENTRIES;
-use cortex::core::types::{ExportData, ExportEntry, SecretText};
+use cortex::domain::limits::MAX_ENTRIES;
+use cortex::domain::types::{ExportData, ExportEntry, SecretText};
 
 use crate::common::TestResult;
 

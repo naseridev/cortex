@@ -1,4 +1,4 @@
-use cortex::core::accounts::Accounts;
+use cortex::storage::accounts::Accounts;
 use std::path::Path;
 
 use crate::common::TestResult;

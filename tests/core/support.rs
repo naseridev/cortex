@@ -1,4 +1,4 @@
-use cortex::core::{crypto::Crypto, storage::Storage};
+use cortex::{security::crypto::Crypto, storage::Storage};
 use tempfile::TempDir;
 
 pub fn setup_vault() -> Result<(TempDir, Storage, Crypto), Box<dyn std::error::Error>> {

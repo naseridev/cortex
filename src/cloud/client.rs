@@ -3,7 +3,9 @@ use crate::{
         config::{CloudConfig, CloudRemote},
         provider::{CloudCredentials, ProviderSettings},
     },
-    core::{accounts::Accounts, limits::MAX_DUMP_BYTES, platform::Platform},
+    domain::limits::MAX_DUMP_BYTES,
+    storage::accounts::Accounts,
+    system::platform::Platform,
 };
 use opendal::{ErrorKind, Operator, services};
 use std::path::{Path, PathBuf};

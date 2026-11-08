@@ -1,5 +1,5 @@
-use cortex::core::crypto::Crypto;
-use cortex::core::types::PasswordEntry;
+use cortex::domain::types::PasswordEntry;
+use cortex::security::crypto::Crypto;
 use zeroize::Zeroizing;
 
 use crate::common::TestResult;

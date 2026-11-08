@@ -1,8 +1,8 @@
 use crate::support::setup_vault;
-use cortex::core::crypto::Crypto;
-use cortex::core::storage::Storage;
-use cortex::core::types::PasswordEntry;
+use cortex::domain::types::PasswordEntry;
 use cortex::formats::dump::Dump;
+use cortex::security::crypto::Crypto;
+use cortex::storage::Storage;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

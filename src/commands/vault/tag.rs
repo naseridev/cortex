@@ -3,12 +3,12 @@ pub mod list;
 pub mod remove;
 
 use crate::{
-    core::{
-        crypto::Crypto,
-        storage::Storage,
+    domain::{
         tags::TagValidator,
         types::{PasswordEntry, SecretText},
     },
+    security::crypto::Crypto,
+    storage::Storage,
     ui::cli::TagAction,
 };
 use zeroize::Zeroizing;

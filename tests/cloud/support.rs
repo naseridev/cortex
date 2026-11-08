@@ -1,4 +1,4 @@
-use cortex::core::{crypto::Crypto, types::PasswordEntry};
+use cortex::{domain::types::PasswordEntry, security::crypto::Crypto};
 
 pub fn sample_entry(
     crypto: &Crypto,

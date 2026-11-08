@@ -9,7 +9,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
+  APP_NAME: cortex
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -17,34 +22,90 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   prepare:
-    name: Resolve version
+    name: Resolve release metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      base_version: ${{ steps.meta.outputs.base_version }}
+      deb_version: ${{ steps.meta.outputs.deb_version }}
+      rpm_release: ${{ steps.meta.outputs.rpm_release }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      description: ${{ steps.meta.outputs.description }}
+      license: ${{ steps.meta.outputs.license }}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Resolve and validate version
         id: meta
-        shell: bash
         run: |
-          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f 2)
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v${version}" ]]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version v${version}"
+          package="$(cargo metadata --no-deps --format-version 1 | jq -c --arg bin "$APP_NAME" '[.packages[] | select(any(.targets[]; .name == $bin and (.kind | index("bin"))))][0]')"
+          if [[ "$package" == "null" ]]; then
+            echo "::error::No package with a binary target named ${APP_NAME} was found"
             exit 1
           fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          version="$(jq -r '.version' <<<"$package")"
+          description="$(jq -r '(.description // "") | gsub("\\s+"; " ") | gsub("^ +| +$"; "")' <<<"$package")"
+          license="$(jq -r '.license // "Proprietary"' <<<"$package")"
+          description="${description:-${APP_NAME}}"
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag_pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+            if [[ ! "$GITHUB_REF_NAME" =~ $tag_pattern ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} is not a valid semantic version tag"
+              exit 1
+            fi
+            if [[ "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match the Cargo.toml version ${version}"
+              exit 1
+            fi
+          fi
+
+          base="${version%%-*}"
+          if [[ "$version" == *-* ]]; then
+            pre="${version#*-}"
+            prerelease=true
+            deb_version="${base}~${pre}"
+            rpm_release="0.${pre//[^0-9A-Za-z.]/.}"
+          else
+            prerelease=false
+            deb_version="$base"
+            rpm_release=1
+          fi
+
+          {
+            printf 'version=%s\n' "$version"
+            printf 'base_version=%s\n' "$base"
+            printf 'deb_version=%s\n' "$deb_version"
+            printf 'rpm_release=%s\n' "$rpm_release"
+            printf 'prerelease=%s\n' "$prerelease"
+            printf 'description=%s\n' "$description"
+            printf 'license=%s\n' "$license"
+          } >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build (${{ matrix.target }})
+    name: Package (${{ matrix.target }})
     needs: [ci, prepare]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
+      DEB_VERSION: ${{ needs.prepare.outputs.deb_version }}
+      RPM_RELEASE: ${{ needs.prepare.outputs.rpm_release }}
+      DESCRIPTION: ${{ needs.prepare.outputs.description }}
+      LICENSE_ID: ${{ needs.prepare.outputs.license }}
+      MAINTAINER: ${{ vars.PACKAGE_MAINTAINER || format('{0} <noreply@github.com>', github.repository_owner) }}
+      PUBLISHER: ${{ github.repository_owner }}
       TARGET: ${{ matrix.target }}
       BIN_NAME: ${{ matrix.bin_name }}
+      EXPECTED_FILES: ${{ matrix.packages }}
     strategy:
       fail-fast: false
       matrix:
@@ -52,15 +113,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             bin_name: cortex
+            packages: 3
           - os: macos-latest
             target: aarch64-apple-darwin
             bin_name: cortex
+            packages: 2
           - os: macos-latest
             target: x86_64-apple-darwin
             bin_name: cortex
+            packages: 2
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             bin_name: cortex.exe
+            packages: 2
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +133,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config xorg-dev libxcb-shape0-dev libxcb-xfixes0-dev
+          sudo apt-get install -y libdbus-1-dev pkg-config xorg-dev libxcb-shape0-dev libxcb-xfixes0-dev rpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -81,41 +146,208 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --target "$TARGET"
 
+      - name: Prepare output directory
+        run: mkdir -p dist
+
       - name: Package Unix archive
         if: runner.os != 'Windows'
-        shell: bash
         run: |
-          stage="cortex-v${VERSION}-${TARGET}"
+          name="${APP_NAME}-v${VERSION}-${TARGET}"
+          stage="${RUNNER_TEMP}/${name}"
           mkdir -p "$stage"
           cp "target/${TARGET}/release/${BIN_NAME}" README.md README.wiki.md "$stage/"
-          tar -czf "${stage}.tar.gz" "$stage"
-          shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+          tar -czf "dist/${name}.tar.gz" -C "$RUNNER_TEMP" "$name"
 
       - name: Package Windows archive
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $stage = "cortex-v$($env:VERSION)-$($env:TARGET)"
+          $name = "$($env:APP_NAME)-v$($env:VERSION)-$($env:TARGET)"
+          $stage = Join-Path $env:RUNNER_TEMP $name
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "target/$($env:TARGET)/release/$($env:BIN_NAME)", "README.md", "README.wiki.md" -Destination $stage
-          Compress-Archive -Path $stage -DestinationPath "${stage}.zip"
-          $hash = (Get-FileHash "${stage}.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  ${stage}.zip" | Out-File -FilePath "${stage}.zip.sha256" -Encoding ascii
+          Copy-Item -Path "target\$($env:TARGET)\release\$($env:BIN_NAME)", "README.md", "README.wiki.md" -Destination $stage
+          Compress-Archive -Path $stage -DestinationPath (Join-Path $PWD.Path "dist\$name.zip")
+
+      - name: Package deb and rpm
+        if: runner.os == 'Linux'
+        run: |
+          name="${APP_NAME}-v${VERSION}-${TARGET}"
+          bin="${GITHUB_WORKSPACE}/target/${TARGET}/release/${BIN_NAME}"
+          work="$(mktemp -d)"
+
+          mkdir -p "${work}/shlibs/debian"
+          printf 'Source: %s\n\nPackage: %s\nArchitecture: any\n' "$APP_NAME" "$APP_NAME" > "${work}/shlibs/debian/control"
+          deps="$(cd "${work}/shlibs" && dpkg-shlibdeps -O -e"${bin}" | sed -n 's/^shlibs:Depends=//p')"
+
+          root="${work}/deb"
+          install -Dm755 "$bin" "${root}/usr/bin/${BIN_NAME}"
+          install -Dm644 README.md "${root}/usr/share/doc/${APP_NAME}/README.md"
+          installed_size="$(du -sk "$root" | cut -f1)"
+          install -d "${root}/DEBIAN"
+          {
+            echo "Package: ${APP_NAME}"
+            echo "Version: ${DEB_VERSION}"
+            echo "Section: utils"
+            echo "Priority: optional"
+            echo "Architecture: amd64"
+            echo "Maintainer: ${MAINTAINER}"
+            echo "Installed-Size: ${installed_size}"
+            if [[ -n "$deps" ]]; then
+              echo "Depends: ${deps}"
+            fi
+            echo "Homepage: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+            echo "Description: ${DESCRIPTION}"
+          } > "${root}/DEBIAN/control"
+          dpkg-deb --root-owner-group -Zxz --build "$root" "dist/${name}.deb"
+
+          top="${work}/rpmbuild"
+          mkdir -p "${top}"/{BUILD,RPMS,SOURCES,SPECS}
+          install -m755 "$bin" "${top}/SOURCES/${BIN_NAME}"
+          install -m644 README.md "${top}/SOURCES/README.md"
+          cat > "${top}/SPECS/${APP_NAME}.spec" <<EOF
+          %global debug_package %{nil}
+          %global _build_id_links none
+          %global __strip /bin/true
+
+          Name: ${APP_NAME}
+          Version: ${BASE_VERSION}
+          Release: ${RPM_RELEASE}
+          Summary: ${DESCRIPTION}
+          License: ${LICENSE_ID}
+          URL: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}
+
+          %description
+          ${DESCRIPTION}
+
+          %install
+          install -Dm755 %{_sourcedir}/${BIN_NAME} %{buildroot}%{_bindir}/${BIN_NAME}
+          install -Dm644 %{_sourcedir}/README.md %{buildroot}%{_docdir}/%{name}/README.md
+
+          %files
+          %{_bindir}/${BIN_NAME}
+          %{_docdir}/%{name}/README.md
+          EOF
+          rpmbuild -bb --define "_topdir ${top}" "${top}/SPECS/${APP_NAME}.spec"
+          cp "${top}"/RPMS/x86_64/*.rpm "dist/${name}.rpm"
+
+      - name: Package macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          name="${APP_NAME}-v${VERSION}-${TARGET}"
+          owner="$(printf '%s' "$PUBLISHER" | tr '[:upper:]' '[:lower:]')"
+          root="$(mktemp -d)"
+          install -d "${root}/bin"
+          install -m755 "target/${TARGET}/release/${BIN_NAME}" "${root}/bin/${BIN_NAME}"
+          pkgbuild \
+            --root "$root" \
+            --identifier "io.github.${owner}.${APP_NAME}" \
+            --version "$BASE_VERSION" \
+            --install-location /usr/local \
+            --ownership recommended \
+            "dist/${name}.pkg"
+
+      - name: Package Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          $env:PATH = "$(Join-Path $env:USERPROFILE '.dotnet\tools');$env:PATH"
+          $root = $PWD.Path
+          $name = "$($env:APP_NAME)-v$($env:VERSION)-$($env:TARGET)"
+          wix build -arch x64 `
+            -d "ProductVersion=$($env:BASE_VERSION)" `
+            -d "Manufacturer=$($env:PUBLISHER)" `
+            -d "BinaryPath=$root\target\$($env:TARGET)\release\$($env:BIN_NAME)" `
+            -d "ReadmePath=$root\README.md" `
+            -o "$root\dist\$name.msi" `
+            "$root\packaging\windows\cortex.wxs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item "$root\dist\*.wixpdb" -ErrorAction SilentlyContinue
+
+      - name: Verify packages
+        run: |
+          ls -l dist
+          count="$(find dist -type f | wc -l)"
+          if (( count != EXPECTED_FILES )); then
+            echo "::error::Expected ${EXPECTED_FILES} packages but found ${count}"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
+          path: dist/*
           if-no-files-found: error
-          path: |
-            cortex-v*.tar.gz
-            cortex-v*.tar.gz.sha256
-            cortex-v*.zip
-            cortex-v*.zip.sha256
+          retention-days: 7
+
+  arch:
+    name: Package (Arch Linux)
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      DESCRIPTION: ${{ needs.prepare.outputs.description }}
+      LICENSE_ID: ${{ needs.prepare.outputs.license }}
+      TARGET: x86_64-unknown-linux-gnu
+      URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - name: Install packaging tools
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm --needed base-devel git
+          useradd --create-home builder
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ env.TARGET }}
+          path: source
+
+      - name: Build Arch package
+        run: |
+          work="${RUNNER_TEMP}/arch"
+          archive="${APP_NAME}-v${VERSION}-${TARGET}.tar.gz"
+          pkgver="${VERSION//-/_}"
+          mkdir -p "$work" dist
+          cp "source/${archive}" "$work/"
+          sum="$(sha256sum "$work/${archive}" | cut -d ' ' -f 1)"
+          sed \
+            -e "s|@PKGVER@|${pkgver}|g" \
+            -e "s|@VERSION@|${VERSION}|g" \
+            -e "s|@TARGET@|${TARGET}|g" \
+            -e "s|@DESCRIPTION@|${DESCRIPTION}|g" \
+            -e "s|@LICENSE@|${LICENSE_ID}|g" \
+            -e "s|@URL@|${URL}|g" \
+            -e "s|@SHA256@|${sum}|g" \
+            packaging/arch/PKGBUILD.in > "$work/PKGBUILD"
+          chown -R builder:builder "$work"
+          runuser -u builder -- bash -c "cd '${work}' && makepkg --force --noconfirm --cleanbuild"
+          cp "${work}/${APP_NAME}"-*.pkg.tar.zst "dist/${APP_NAME}-v${VERSION}-${TARGET}.pkg.tar.zst"
+
+      - name: Verify package
+        run: |
+          count="$(find dist -maxdepth 1 -name '*.pkg.tar.zst' | wc -l)"
+          if (( count != 1 )); then
+            echo "::error::Expected 1 Arch package but found ${count}"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-arch
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
     name: Publish GitHub Release
-    needs: [prepare, build]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [prepare, build, arch]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -125,45 +357,47 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: artifacts
           merge-multiple: true
 
       - name: Generate checksums and release notes
-        shell: bash
         run: |
-          cat artifacts/*.sha256 > artifacts/SHA256SUMS.txt
-          cat > "${RUNNER_TEMP}/release_notes.md" <<EOF
-          ## Cortex v${VERSION}
+          cd artifacts
+          sha256sum -- * > SHA256SUMS.txt
+          cd "$GITHUB_WORKSPACE"
+          {
+            echo "## Cortex v${VERSION}"
+            echo
+            cat <<'EOF'
+          ### Installation
 
-          ### Highlights in v${VERSION}
-          - **Modular Architecture**: Refactored into dedicated \`security\`, \`storage\`, \`domain\`, and \`system\` modules.
-          - **Cryptography & Integrity**: Argon2id (64 MiB, 3 iterations), ChaCha20-Poly1305 AEAD, and keyed BLAKE3 database manifests.
-          - **Multi-Account Storage**: Isolated \`redb\` vaults with BLAKE3-hashed filenames and OS keyring session caching.
-          - **Multi-Cloud Sync**: Deterministic two-way synchronization with tombstone tracking across 15 storage providers.
-
-          ### Pre-compiled Binaries
-          | Platform | Architecture | Archive |
+          | Platform | Package | How to install |
           | --- | --- | --- |
-          | Linux | x86_64 | \`cortex-v${VERSION}-x86_64-unknown-linux-gnu.tar.gz\` |
-          | macOS (Apple Silicon) | ARM64 | \`cortex-v${VERSION}-aarch64-apple-darwin.tar.gz\` |
-          | macOS (Intel) | x86_64 | \`cortex-v${VERSION}-x86_64-apple-darwin.tar.gz\` |
-          | Windows | x86_64 | \`cortex-v${VERSION}-x86_64-pc-windows-msvc.zip\` |
+          | Windows x64 | `.msi` | Run the installer. The `cortex` command is added to PATH. |
+          | macOS Apple Silicon and Intel | `.pkg` | Open the package. The binary is installed to `/usr/local/bin`. |
+          | Debian and Ubuntu x64 | `.deb` | `sudo apt install ./cortex-*.deb` |
+          | Fedora and RHEL x64 | `.rpm` | `sudo dnf install ./cortex-*.rpm` |
+          | Arch Linux x64 | `.pkg.tar.zst` | `sudo pacman -U ./cortex-*.pkg.tar.zst` |
+          | Any | `.tar.gz` or `.zip` | Extract the archive and run the binary directly. |
+
+          The installers are not code-signed, so Windows SmartScreen and macOS Gatekeeper may show a warning on first run.
 
           ### SHA-256 Checksums
-          \`\`\`text
-          $(cat artifacts/SHA256SUMS.txt)
-          \`\`\`
+
+          ```text
           EOF
+            cat artifacts/SHA256SUMS.txt
+            echo '```'
+          } > "${RUNNER_TEMP}/release_notes.md"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Cortex v${{ needs.prepare.outputs.version }}
           tag_name: ${{ github.ref_name }}
+          name: Cortex v${{ needs.prepare.outputs.version }}
           body_path: ${{ runner.temp }}/release_notes.md
           generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.prerelease }}
           fail_on_unmatched_files: true
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.zip
-            artifacts/SHA256SUMS.txt
+          files: artifacts/*

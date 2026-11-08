@@ -1,0 +1,17 @@
+pkgname=cortex
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="@DESCRIPTION@"
+arch=('x86_64')
+url="@URL@"
+license=('@LICENSE@')
+depends=('dbus' 'libxcb')
+options=('!strip' '!debug')
+source=("cortex-v@VERSION@-@TARGET@.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+  local dir="${srcdir}/cortex-v@VERSION@-@TARGET@"
+  install -Dm755 "${dir}/cortex" "${pkgdir}/usr/bin/cortex"
+  install -Dm644 "${dir}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

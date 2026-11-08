@@ -7,39 +7,62 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve and validate version
+        id: meta
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f 2)
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v${version}" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version v${version}"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build (${{ matrix.target }})
+    needs: [ci, prepare]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      BIN_NAME: ${{ matrix.bin_name }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive_ext: tar.gz
             bin_name: cortex
           - os: macos-latest
             target: aarch64-apple-darwin
-            archive_ext: tar.gz
             bin_name: cortex
           - os: macos-latest
             target: x86_64-apple-darwin
-            archive_ext: tar.gz
             bin_name: cortex
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            archive_ext: zip
             bin_name: cortex.exe
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -47,86 +70,70 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config xorg-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache Cargo registry and target
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
-      - name: Extract version from Cargo.toml
-        id: meta
-        shell: bash
-        run: |
-          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Build release binary
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
 
       - name: Package Unix archive
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          STAGE="cortex-v${{ steps.meta.outputs.version }}-${{ matrix.target }}"
-          mkdir -p "$STAGE"
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "$STAGE/"
-          cp README.md README.wiki.md "$STAGE/"
-          tar -czf "${STAGE}.tar.gz" "$STAGE"
-          shasum -a 256 "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256"
+          stage="cortex-v${VERSION}-${TARGET}"
+          mkdir -p "$stage"
+          cp "target/${TARGET}/release/${BIN_NAME}" README.md README.wiki.md "$stage/"
+          tar -czf "${stage}.tar.gz" "$stage"
+          shasum -a 256 "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
 
       - name: Package Windows archive
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $Stage = "cortex-v${{ steps.meta.outputs.version }}-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" -Destination "$Stage/"
-          Copy-Item "README.md", "README.wiki.md" -Destination "$Stage/"
-          Compress-Archive -Path "$Stage" -DestinationPath "${Stage}.zip"
-          $Hash = (Get-FileHash "${Stage}.zip" -Algorithm SHA256).Hash.ToLower()
-          "$Hash  ${Stage}.zip" | Out-File -Encoding ascii "${Stage}.zip.sha256"
+          $stage = "cortex-v$($env:VERSION)-$($env:TARGET)"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/$($env:TARGET)/release/$($env:BIN_NAME)", "README.md", "README.wiki.md" -Destination $stage
+          Compress-Archive -Path $stage -DestinationPath "${stage}.zip"
+          $hash = (Get-FileHash "${stage}.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${stage}.zip" | Out-File -FilePath "${stage}.zip.sha256" -Encoding ascii
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.target }}
+          if-no-files-found: error
           path: |
             cortex-v*.tar.gz
+            cortex-v*.tar.gz.sha256
             cortex-v*.zip
-            cortex-v*.sha256
+            cortex-v*.zip.sha256
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [prepare, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      - name: Generate combined checksums and release notes
-        id: notes
+      - name: Generate checksums and release notes
         shell: bash
         run: |
-          VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          cd artifacts
-          cat *.sha256 > SHA256SUMS.txt
-
-          cat <<EOF > release_notes.md
+          cat artifacts/*.sha256 > artifacts/SHA256SUMS.txt
+          cat > "${RUNNER_TEMP}/release_notes.md" <<EOF
           ## Cortex v${VERSION}
-
-          A secure, multi-account password manager using Argon2id key derivation, ChaCha20-Poly1305 authenticated encryption, BLAKE3 tamper detection, and OpenDAL multi-cloud synchronization.
 
           ### Highlights in v${VERSION}
           - **Modular Architecture**: Refactored into dedicated \`security\`, \`storage\`, \`domain\`, and \`system\` modules.
@@ -144,16 +151,18 @@ jobs:
 
           ### SHA-256 Checksums
           \`\`\`text
-          $(cat SHA256SUMS.txt)
+          $(cat artifacts/SHA256SUMS.txt)
           \`\`\`
           EOF
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Cortex v${{ steps.notes.outputs.version }}
-          body_path: artifacts/release_notes.md
+          name: Cortex v${{ needs.prepare.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/release_notes.md
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip

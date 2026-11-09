@@ -40,13 +40,17 @@ macro_rules! oauth_builder {
     ($service:path, $root:expr, $creds:expr) => {{
         let creds: &CloudCredentials = $creds;
         let mut builder = <$service>::default().root($root);
+        let has_refresh = creds
+            .refresh_token
+            .as_deref()
+            .is_some_and(|s| !s.is_empty());
 
-        if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
+        if has_refresh {
+            if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
+                builder = builder.refresh_token(refresh);
+            }
+        } else if let Some(token) = creds.token.as_deref().filter(|s| !s.is_empty()) {
             builder = builder.access_token(token);
-        }
-
-        if let Some(refresh) = creds.refresh_token.as_deref().filter(|s| !s.is_empty()) {
-            builder = builder.refresh_token(refresh);
         }
 
         if let Some(id) = creds.client_id.as_deref().filter(|s| !s.is_empty()) {
